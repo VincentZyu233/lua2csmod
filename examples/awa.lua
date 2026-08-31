@@ -1,13 +1,13 @@
 local plugin = cs.plugin({
     name = "awa",
-    version = "0.1.1",
+    version = "0.1.2",
     description = "玩家发送 awa 时回复，并播报真人玩家进服和离服"
 })
 
 plugin:on("player_chat", function(event)
     -- player_chat 是游戏事件；返回 cs.continue 保持其他插件和原事件继续处理。
     if event.player ~= nil and event.text:lower() == "awa" then
-        event.player:print_chat(cs.colors.green .. "awa_from_lua!" .. cs.colors.default)
+        event.player:print_chat(cs.colors.light_purple .. "awa_from_lua!" .. cs.colors.default)
     end
 
     return cs.continue
@@ -16,7 +16,7 @@ end)
 plugin:on("player_connect_full", function(event)
     -- 过滤机器人，避免批量加 Bot 时刷屏。
     if event.player ~= nil and not event.player.is_bot and not event.player.is_hltv then
-        cs.server.print_chat_all(cs.colors.green .. "awa_from_lua!!!" .. cs.colors.default)
+        cs.server.print_chat_all(cs.colors.light_purple .. "awa_from_lua!!!" .. cs.colors.default)
     end
 
     return cs.continue
@@ -36,6 +36,6 @@ plugin:on("player_disconnect", function(event)
         return cs.continue
     end
 
-    cs.server.print_chat_all(cs.colors.green .. "awa_from_lua...." .. cs.colors.default)
+    cs.server.print_chat_all(cs.colors.light_purple .. "awa_from_lua...." .. cs.colors.default)
     return cs.continue
 end)
