@@ -11,7 +11,8 @@ public sealed class HotReload : IDisposable
     private readonly int _debounceMilliseconds;
     private readonly FileSystemWatcher _watcher;
     private readonly object _sync = new();
-    private readonly HashSet<string> _changedPaths = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _changedPaths = new(
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private ThreadingTimer? _timer;
     private bool _disposed;
 

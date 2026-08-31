@@ -491,11 +491,16 @@ public sealed class LuaRuntimeTests : IDisposable
         Assert.Equal(expected, LuaPluginManager.IsStandaloneScript(path));
 
     [Fact]
-    public void ScriptPathResolutionSupportsUppercaseLuaExtensionsOnLinux()
+    public void ScriptPathResolutionSupportsUppercaseLuaExtensions()
     {
         var path = WriteScript("UPPER.LUA", "cs.plugin({ name = 'Upper' })");
+        var resolved = LuaPluginManager.ResolveScriptPath(_directory, "upper");
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
 
-        Assert.Equal(path, LuaPluginManager.ResolveScriptPath(_directory, "upper"));
+        Assert.True(string.Equals(path, resolved, comparison));
+        Assert.True(File.Exists(resolved));
     }
 
     [Fact]

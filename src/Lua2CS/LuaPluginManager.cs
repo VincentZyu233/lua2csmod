@@ -7,6 +7,10 @@ namespace Lua2CS;
 
 public sealed class LuaPluginManager : IDisposable
 {
+    private static readonly StringComparison PathComparison = OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+
     private readonly ILogger _logger;
     private readonly string _scriptsDirectory;
     private readonly LuaRuntime _runtime;
@@ -208,7 +212,7 @@ public sealed class LuaPluginManager : IDisposable
     {
         path = Path.GetFullPath(path);
         scriptsDirectory = Path.GetFullPath(scriptsDirectory);
-        return !Path.GetDirectoryName(path)!.Equals(scriptsDirectory, StringComparison.Ordinal)
+        return !Path.GetDirectoryName(path)!.Equals(scriptsDirectory, PathComparison)
                || !IsStandaloneScript(path);
     }
 
@@ -282,7 +286,7 @@ public sealed class LuaPluginManager : IDisposable
     {
         scriptsDirectory = Path.GetFullPath(scriptsDirectory);
         var path = Path.GetFullPath(Path.Combine(scriptsDirectory, key + ".lua"));
-        if (!Path.GetDirectoryName(path)!.Equals(scriptsDirectory, StringComparison.Ordinal))
+        if (!Path.GetDirectoryName(path)!.Equals(scriptsDirectory, PathComparison))
         {
             throw new InvalidOperationException("Script path escapes the configured scripts directory.");
         }

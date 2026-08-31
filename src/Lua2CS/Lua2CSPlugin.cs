@@ -118,7 +118,10 @@ public sealed class Lua2CSPlugin : BasePlugin, IPluginConfig<Lua2CSConfig>
     {
         var moduleDirectory = Path.GetFullPath(ModuleDirectory);
         var scriptsDirectory = Path.GetFullPath(Path.Combine(moduleDirectory, Config.ScriptsDirectory));
-        if (!scriptsDirectory.StartsWith(moduleDirectory + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        var pathComparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (!scriptsDirectory.StartsWith(moduleDirectory + Path.DirectorySeparatorChar, pathComparison))
         {
             throw new InvalidDataException("ScriptsDirectory escapes the Lua2CS plugin directory.");
         }
