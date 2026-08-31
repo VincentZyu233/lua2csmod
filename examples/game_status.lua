@@ -5,12 +5,14 @@ local plugin = cs.plugin({
 })
 
 plugin:command("css_luagame", function(_, command)
+    -- 游戏规则实体在地图加载早期可能尚未出现，因此必须处理 nil。
     local rules = cs.game.rules()
     if rules == nil then
         command:reply("当前无法获取游戏规则实体。")
         return
     end
 
+    -- rules 是调用时的快照；长期保存不会自动更新。
     command:reply(string.format(
         "回合 %d | T %s : %s CT | 热身 %s | 冻结时间 %s | C4 已安装 %s",
         rules.total_rounds_played,

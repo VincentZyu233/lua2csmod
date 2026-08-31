@@ -5,6 +5,7 @@ local plugin = cs.plugin({
 })
 
 plugin:command("css_luaserver", function(_, command)
+    -- server.info 一次返回地图、Tick 和多种时间，适合状态面板统一读取。
     local info = cs.server.info()
     command:reply(string.format(
         "地图：%s，玩家：%d，Tick：%d，地图时间：%.1f 秒",
@@ -22,6 +23,7 @@ plugin:command("css_luamap", {
     usage = "<地图名>"
 }, function(_, command)
     local map = command.args[1]
+    -- 在拼接 changelevel 命令前先让服务器验证地图名，避免无效输入进入命令。
     if not cs.server.is_map_valid(map) then
         command:reply("地图不存在或不可用：" .. map)
         return

@@ -98,6 +98,13 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         local player_set_velocity_modifier = __lua2cs_player_set_velocity_modifier
         local player_set_model = __lua2cs_player_set_model
         local player_set_render_color = __lua2cs_player_set_render_color
+        local player_set_ammo = __lua2cs_player_set_ammo
+        local player_set_score = __lua2cs_player_set_score
+        local player_set_round_score = __lua2cs_player_set_round_score
+        local player_set_mvps = __lua2cs_player_set_mvps
+        local player_set_voice_flags = __lua2cs_player_set_voice_flags
+        local player_replicate_convar = __lua2cs_player_replicate_convar
+        local player_set_fake_convar = __lua2cs_player_set_fake_convar
         local player_emit_sound = __lua2cs_player_emit_sound
         local command_reply = __lua2cs_command_reply
 
@@ -188,6 +195,14 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
                 all_hostages_rescued = "all_hostages_rescued",
                 target_saved = "target_saved",
                 game_commencing = "game_commencing"
+            },
+            voice = {
+                normal = 0,
+                muted = 1 << 0,
+                all = 1 << 1,
+                listen_all = 1 << 2,
+                team = 1 << 3,
+                listen_team = 1 << 4
             },
             buttons = {
                 attack = 1 << 0,
@@ -474,6 +489,43 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
             return menu_close(self)
         end
 
+        function __lua2cs_player_set_ammo_method(self, clip, reserve)
+            local slot = current_player_slot(self)
+            if slot == nil then return false end
+            if clip == nil and reserve == nil then error("弹匣和备弹不能同时省略", 2) end
+            return player_set_ammo(slot, clip or -1, reserve or -1)
+        end
+
+        function __lua2cs_player_set_score_method(self, score)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_set_score(slot, score) or false
+        end
+
+        function __lua2cs_player_set_round_score_method(self, score)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_set_round_score(slot, score) or false
+        end
+
+        function __lua2cs_player_set_mvps_method(self, mvps)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_set_mvps(slot, mvps) or false
+        end
+
+        function __lua2cs_player_set_voice_flags_method(self, flags)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_set_voice_flags(slot, flags) or false
+        end
+
+        function __lua2cs_player_replicate_convar_method(self, name, value)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_replicate_convar(slot, name, tostring(value)) or false
+        end
+
+        function __lua2cs_player_set_fake_convar_method(self, name, value)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_set_fake_convar(slot, name, tostring(value)) or false
+        end
+
         function __lua2cs_player_emit_sound_method(self, sound_event_name, volume, pitch)
             local slot = current_player_slot(self)
             if slot == nil then return 0 end
@@ -622,6 +674,13 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         __lua2cs_player_set_velocity_modifier = nil
         __lua2cs_player_set_model = nil
         __lua2cs_player_set_render_color = nil
+        __lua2cs_player_set_ammo = nil
+        __lua2cs_player_set_score = nil
+        __lua2cs_player_set_round_score = nil
+        __lua2cs_player_set_mvps = nil
+        __lua2cs_player_set_voice_flags = nil
+        __lua2cs_player_replicate_convar = nil
+        __lua2cs_player_set_fake_convar = nil
         __lua2cs_player_emit_sound = nil
         __lua2cs_command_reply = nil
         """;
@@ -763,6 +822,13 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         Register(state, api, "__lua2cs_player_set_velocity_modifier", nameof(LuaApi.PlayerSetVelocityModifier));
         Register(state, api, "__lua2cs_player_set_model", nameof(LuaApi.PlayerSetModel));
         Register(state, api, "__lua2cs_player_set_render_color", nameof(LuaApi.PlayerSetRenderColor));
+        Register(state, api, "__lua2cs_player_set_ammo", nameof(LuaApi.PlayerSetAmmo));
+        Register(state, api, "__lua2cs_player_set_score", nameof(LuaApi.PlayerSetScore));
+        Register(state, api, "__lua2cs_player_set_round_score", nameof(LuaApi.PlayerSetRoundScore));
+        Register(state, api, "__lua2cs_player_set_mvps", nameof(LuaApi.PlayerSetMvps));
+        Register(state, api, "__lua2cs_player_set_voice_flags", nameof(LuaApi.PlayerSetVoiceFlags));
+        Register(state, api, "__lua2cs_player_replicate_convar", nameof(LuaApi.PlayerReplicateConVar));
+        Register(state, api, "__lua2cs_player_set_fake_convar", nameof(LuaApi.PlayerSetFakeConVar));
         Register(state, api, "__lua2cs_player_emit_sound", nameof(LuaApi.PlayerEmitSound));
         Register(state, api, "__lua2cs_command_reply", nameof(LuaApi.CommandReply));
     }

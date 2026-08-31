@@ -5,6 +5,7 @@ local plugin = cs.plugin({
 })
 
 local function storage_key(steam_id)
+    -- 为不同用途增加键前缀，避免插件自己的持久化键发生冲突。
     return "kills:" .. steam_id
 end
 
@@ -16,6 +17,7 @@ plugin:on("player_death", function(event)
     end
 
     local key = storage_key(attacker.steam_id)
+    -- cs.storage 写入采用临时文件替换，数据可以跨热重载和服务器重启保留。
     local kills = cs.storage.get(key, 0) + 1
     cs.storage.set(key, kills)
     attacker:print_chat("你的 Lua 累计击杀数：" .. kills)

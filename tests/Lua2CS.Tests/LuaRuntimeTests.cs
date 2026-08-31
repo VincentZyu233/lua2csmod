@@ -184,6 +184,7 @@ public sealed class LuaRuntimeTests : IDisposable
             assert(cs.nav.areas ~= nil and cs.nav.closest ~= nil)
             assert(cs.menu.open ~= nil and cs.menu.close ~= nil)
             assert(cs.round_end.ct_win == "ct_win")
+            assert(cs.voice.muted == 1 and cs.voice.listen_team == 16)
             assert(cs.team.t == 2 and cs.team.ct == 3)
             assert(cs.buttons.jump == 2)
 
@@ -216,6 +217,9 @@ public sealed class LuaRuntimeTests : IDisposable
             assert(__lua2cs_menu_open == nil)
             assert(__lua2cs_player_set_model_method == nil)
             assert(__lua2cs_entity_set_gravity_method == nil)
+            assert(__lua2cs_player_set_ammo == nil)
+            assert(__lua2cs_player_replicate_convar == nil)
+            assert(__lua2cs_player_set_voice_flags_method == nil)
             """);
 
         using var plugin = new LuaRuntime(NullLogger.Instance, false).Prepare(path);
@@ -342,6 +346,43 @@ public sealed class LuaRuntimeTests : IDisposable
         Assert.Throws<ArgumentException>(() => LuaApi.ParsePostSelectAction("invalid"));
     }
 
+    [Theory]
+    [InlineData("cl_language")]
+    [InlineData("  bot_difficulty  ")]
+    public void ConVarNamesAreNormalized(string source) =>
+        Assert.False(string.IsNullOrWhiteSpace(LuaApi.ValidateConVarName(source)));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("bad name")]
+    [InlineData("bad\nname")]
+    public void InvalidConVarNamesAreRejected(string source) =>
+        Assert.Throws<ArgumentException>(() => LuaApi.ValidateConVarName(source));
+
+    [Theory]
+    [InlineData("bad\nvalue")]
+    [InlineData("bad\0value")]
+    public void InvalidConVarValuesAreRejected(string source) =>
+        Assert.Throws<ArgumentException>(() => LuaApi.ValidateConVarValue(source));
+
+    [Fact]
+    public void PlayerMutationArgumentsAreValidatedBeforeNativeLookup()
+    {
+        var path = WriteScript("mutation_validation.lua", "cs.plugin({ name = 'Mutation Validation' })");
+        using var plugin = new LuaRuntime(NullLogger.Instance, false).Prepare(path);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => plugin.Api.PlayerSetAmmo(-1, -2, 90));
+        Assert.Throws<ArgumentOutOfRangeException>(() => plugin.Api.PlayerSetAmmo(-1, 30, 10001));
+        Assert.Throws<ArgumentException>(() => plugin.Api.PlayerSetAmmo(-1, -1, -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => plugin.Api.PlayerSetScore(-1, -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => plugin.Api.PlayerSetVoiceFlags(-1, 32));
+
+        Assert.False(plugin.Api.PlayerSetAmmo(-1, 30, 90));
+        Assert.False(plugin.Api.PlayerSetScore(-1, 10));
+        Assert.False(plugin.Api.PlayerSetVoiceFlags(-1, 0));
+        Assert.False(plugin.Api.PlayerReplicateConVar(-1, "cl_language", "schinese"));
+    }
+
     [Fact]
     public void FailedDynamicRegistrationIsRemovedAgain()
     {
@@ -406,6 +447,19 @@ public sealed class LuaRuntimeTests : IDisposable
     [InlineData("nav_tools.lua")]
     [InlineData("round_control.lua")]
     [InlineData("model_tools.lua")]
+    [InlineData("ammo_refill.lua")]
+    [InlineData("weapon_inspector.lua")]
+    [InlineData("scoreboard_tools.lua")]
+    [InlineData("voice_tools.lua")]
+    [InlineData("client_convar.lua")]
+    [InlineData("bot_convar.lua")]
+    [InlineData("damage_report.lua")]
+    [InlineData("chat_cooldown.lua")]
+    [InlineData("random_loadout.lua")]
+    [InlineData("welcome_menu.lua")]
+    [InlineData("bomb_announcer.lua")]
+    [InlineData("aim_inspector.lua")]
+    [InlineData("team_summary.lua")]
     public void ShippedExamplesLoad(string fileName)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "examples", fileName);

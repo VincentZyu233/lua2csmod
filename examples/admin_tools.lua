@@ -5,6 +5,7 @@ local plugin = cs.plugin({
 })
 
 local function find_one(query, caller, command)
+    -- find 始终返回数组；管理操作应拒绝模糊匹配，避免误操作同名玩家。
     local matches = cs.players.find(query)
     if #matches == 0 then
         command:reply("没有找到玩家：" .. query)
@@ -14,6 +15,7 @@ local function find_one(query, caller, command)
         command:reply("匹配到多名玩家，请输入更完整的名字、槽位或 userid。")
         return nil
     end
+    -- 服务器控制台的 caller 是 nil；游戏内管理员需要通过 CSS 免疫等级检查。
     if caller ~= nil and not caller:can_target(matches[1]) then
         command:reply("你的管理权限不足以操作该玩家。")
         return nil
@@ -63,6 +65,7 @@ plugin:command("css_luateam", {
     local target = find_one(command.args[1], caller, command)
     if target == nil then return end
 
+    -- switch_team 会尽量保留存活和装备；需要遵循比赛规则时改用 change_team。
     target:switch_team(command.args[2])
     command:reply("已切换 " .. target.name .. " 的队伍。")
 end)

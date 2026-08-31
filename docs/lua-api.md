@@ -291,7 +291,10 @@ local targets = cs.players.target("@alive", caller)
 - `is_hltv`：是否为 HLTV。
 - `is_alive`：当前是否存活。
 - `ping`：延迟。
-- `score`、`round_score`、`mvps`：计分板数据。
+- `score`、`round_score`、`rounds_won`、`mvps`：计分板数据。
+- `teammate_color`：竞技队友颜色索引。
+- `language`：玩家通过 CSS 选择的语言名称，例如 `zh-CN`；未设置时使用服务器默认语言。
+- `voice_flags`：当前语音位标志，可结合 `cs.voice` 判断。
 - `health`、`armor`、`money`：生命、护甲和金钱；无有效 Pawn 时可能为 `nil`。
 - `max_health`、`gravity_scale`、`velocity_modifier`：最大生命、重力比例和受击移动速度倍率。
 - `has_helmet`、`has_defuser`：是否有头盔或拆弹器。
@@ -302,7 +305,11 @@ local targets = cs.players.target("@alive", caller)
 - `position`、`velocity`、`eye_angles`：包含 `x`、`y`、`z` 的向量表。
 - `active_weapon`：当前武器的 Designer Name，可能为 `nil`。
 - `weapons`：当前持有武器的 Designer Name 数组。
+- `active_weapon_info`：当前武器详细快照，可能为 `nil`。
+- `weapon_details`：与 `weapons` 顺序一致的详细武器快照数组。
 - `model`、`render_color`：当前模型路径和包含 `red/green/blue/alpha` 的渲染颜色。
+
+武器详细快照字段包括 `handle`、`index`、`designer_name`、`clip`、`reserve`、`reserve_secondary` 和 `item_definition_index`。武器切换、丢弃或删除后旧快照不会自动更新。
 
 玩家方法：
 
@@ -331,9 +338,16 @@ local targets = cs.players.target("@alive", caller)
 - `player:set_model(model_name, precache)`：设置玩家模型；`precache` 默认为 `true`。
 - `player:set_render_color(red, green, blue, alpha)`：设置 Pawn 渲染颜色，各通道限制为 0 到 255，透明度默认为 255。
 - `player:close_menu()`：关闭当前 CSS 菜单。
+- `player:set_ammo(clip, reserve)`：修改当前武器弹匣和主备弹，允许其中一个为 `nil`，但不能同时省略；数量限制为 0 到 10000。
+- `player:set_score(value)`、`player:set_round_score(value)`、`player:set_mvps(value)`：修改非负计分板计数；游戏规则可能随后重新计算。
+- `player:set_voice_flags(flags)`：设置 0 到 31 的 CSS 语音位标志，通常使用 `cs.voice` 常量或按位组合。
+- `player:replicate_convar(name, value)`：只向该客户端复制一个 ConVar 值，不修改服务器全局值。
+- `player:set_fake_convar(name, value)`：设置机器人报告的客户端 ConVar；目标不是真实机器人时返回 `false`。
 - `player:emit_sound(sound_event_name, volume, pitch)`：只向该玩家播放声音事件；音量默认为 1，音调默认为 0，返回声音实体 GUID，失败返回 0。
 
 修改方法在成功找到有效玩家或 Pawn 时返回 `true`，否则返回 `false`。无返回结果的 CSS 底层操作只能表示已成功提交，不能保证游戏规则不会随后覆盖该状态。
+
+ConVar 名称去除首尾空白后必须为 1 到 128 个不含空白或控制字符的字符；复制值最长 4096 字符，不能含换行或空字符。`replicate_convar` 是否对客户端产生可见效果取决于目标 ConVar 的引擎行为。
 
 玩家表是短期视图。所有玩家方法都会同时校验槽位、userid 和 SteamID64，旧表不会因槽位被新玩家复用而误操作新人。玩家断开连接或换图后，应通过查询接口重新获取，不要长期保存旧玩家表。
 
@@ -393,6 +407,8 @@ local is_jumping = (player.buttons & cs.buttons.jump) ~= 0
 `cs.team` 包含 `none`、`spectator`、`terrorist`/`t`、`counter_terrorist`/`ct`。换队方法也接受字符串 `none`、`spec`、`t`、`ct` 或数字 0 到 3。
 
 `cs.buttons` 包含 `attack`、`jump`、`duck`、`forward`、`back`、`use`、`left`、`right`、`move_left`、`move_right`、`attack2`、`reload`、`speed`、`walk`、`zoom`、`scoreboard` 和 `inspect`。
+
+`cs.voice` 包含 `normal`、`muted`、`all`、`listen_all`、`team` 和 `listen_team`。除 `normal` 外均为位标志，可用 Lua 5.4 的 `|` 组合，例如 `cs.voice.team | cs.voice.listen_team`。
 
 ## 导航网格
 
@@ -479,5 +495,18 @@ scripts/
 | `nav_tools.lua` | 查询玩家附近导航区域 | 坐标、导航网格 |
 | `round_control.lua` | 管理员主动结束回合 | 游戏规则、回合结束原因 |
 | `model_tools.lua` | 批量设置模型和渲染颜色 | 玩家模型、预缓存、颜色 |
+| `ammo_refill.lua` | 查看并补充当前武器弹药 | 武器详细快照、弹匣、备弹 |
+| `weapon_inspector.lua` | 列出玩家武器详细信息 | 玩家查询、武器快照 |
+| `scoreboard_tools.lua` | 批量修改计分板数据 | 目标选择、分数、MVP |
+| `voice_tools.lua` | 设置玩家语音模式 | 语音位标志、权限检查 |
+| `client_convar.lua` | 向客户端复制 ConVar | 目标选择、客户端 ConVar |
+| `bot_convar.lua` | 设置机器人客户端 ConVar | 机器人集合、FakeClient ConVar |
+| `damage_report.lua` | 统计并播报回合伤害 | 伤害事件、回合事件、短期状态 |
+| `chat_cooldown.lua` | 带玩家冷却的聊天关键词 | 聊天 Listener、服务器时间 |
+| `random_loadout.lua` | 玩家出生时随机发放装备 | 出生事件、随机数、身份刷新 |
+| `welcome_menu.lua` | 玩家入服后显示欢迎菜单 | Listener、延迟回调、菜单 |
+| `bomb_announcer.lua` | 中文播报 C4 状态变化 | 炸弹事件、聊天颜色 |
+| `aim_inspector.lua` | 查询准星所指玩家 | 准星目标、玩家快照 |
+| `team_summary.lua` | 汇总双方人数和存活状态 | 玩家集合、队伍常量 |
 
 安装包中的模板位于 `addons/counterstrikesharp/plugins/Lua2CS/examples`。复制需要启用的顶层模板到同级 `scripts` 目录；`module_demo.lua` 还需要同时复制 `modules` 子目录。

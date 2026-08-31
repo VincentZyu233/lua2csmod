@@ -10,6 +10,7 @@ plugin:command("css_luaendround", {
     min_args = 1,
     usage = "<ct|t|draw> [延迟秒数]"
 }, function(_, command)
+    -- 使用宿主提供的常量，避免在脚本中散落 CSS 枚举名称。
     local reasons = {
         ct = cs.round_end.ct_win,
         t = cs.round_end.terrorist_win,
@@ -21,6 +22,7 @@ plugin:command("css_luaendround", {
         return
     end
 
+    -- 延迟由宿主限制为 0..60 秒；结束回合会立即影响比赛流程。
     local delay = tonumber(command.args[2]) or 1
     if cs.game.terminate_round(delay, reason) then
         command:reply("已提交回合结束请求。")

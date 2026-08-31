@@ -16,6 +16,7 @@ plugin:command("css_luacolor", {
     local alpha = tonumber(command.args[5]) or 255
     local changed = 0
 
+    -- 颜色通道会被宿主限制到 0..255，目标选择沿用 CSS 原生语法。
     for _, target in ipairs(cs.players.target(command.args[1], caller)) do
         if caller == nil or caller:can_target(target) then
             if target:set_render_color(red, green, blue, alpha) then changed = changed + 1 end
@@ -31,6 +32,7 @@ plugin:command("css_luamodel", {
     usage = "<目标> <已知有效的 .vmdl 路径>"
 }, function(caller, command)
     local changed = 0
+    -- 模型路径必须是服务器已知的 .vmdl；无效资源可能影响客户端稳定性。
     for _, target in ipairs(cs.players.target(command.args[1], caller)) do
         if caller == nil or caller:can_target(target) then
             if target:set_model(command.args[2], true) then changed = changed + 1 end

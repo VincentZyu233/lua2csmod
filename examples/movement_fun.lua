@@ -10,10 +10,12 @@ plugin:command("css_luamove", {
     min_args = 1,
     usage = "<目标> [重力 0-10] [速度倍率 0-10]"
 }, function(caller, command)
+    -- 缺省值 1 表示恢复游戏默认倍率，宿主会把数值限制到 0..10。
     local gravity = tonumber(command.args[2]) or 1
     local velocity_modifier = tonumber(command.args[3]) or 1
     local changed = 0
 
+    -- velocity_modifier 可能被游戏受击逻辑再次覆盖，适合临时娱乐玩法。
     for _, target in ipairs(cs.players.target(command.args[1], caller)) do
         if caller == nil or caller:can_target(target) then
             if target:set_gravity(gravity) and target:set_velocity_modifier(velocity_modifier) then

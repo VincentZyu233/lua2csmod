@@ -7,6 +7,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Core.Translations;
 using CounterStrikeSharp.API.Modules.Admin;
 using CounterStrikeSharp.API.Modules.Commands;
 using CounterStrikeSharp.API.Modules.Commands.Targeting;
@@ -65,6 +66,13 @@ public sealed class LuaApi : IDisposable
         "__lua2cs_player_set_model_method",
         "__lua2cs_player_set_render_color_method",
         "__lua2cs_player_close_menu_method",
+        "__lua2cs_player_set_ammo_method",
+        "__lua2cs_player_set_score_method",
+        "__lua2cs_player_set_round_score_method",
+        "__lua2cs_player_set_mvps_method",
+        "__lua2cs_player_set_voice_flags_method",
+        "__lua2cs_player_replicate_convar_method",
+        "__lua2cs_player_set_fake_convar_method",
         "__lua2cs_player_emit_sound_method",
         "__lua2cs_entity_refresh_method",
         "__lua2cs_entity_spawn_method",
@@ -116,6 +124,13 @@ public sealed class LuaApi : IDisposable
     private LuaFunction? _playerSetModelMethod;
     private LuaFunction? _playerSetRenderColorMethod;
     private LuaFunction? _playerCloseMenuMethod;
+    private LuaFunction? _playerSetAmmoMethod;
+    private LuaFunction? _playerSetScoreMethod;
+    private LuaFunction? _playerSetRoundScoreMethod;
+    private LuaFunction? _playerSetMvpsMethod;
+    private LuaFunction? _playerSetVoiceFlagsMethod;
+    private LuaFunction? _playerReplicateConVarMethod;
+    private LuaFunction? _playerSetFakeConVarMethod;
     private LuaFunction? _playerEmitSoundMethod;
     private LuaFunction? _entityRefreshMethod;
     private LuaFunction? _entitySpawnMethod;
@@ -174,6 +189,13 @@ public sealed class LuaApi : IDisposable
         _playerSetModelMethod = _plugin.State.GetFunction("__lua2cs_player_set_model_method");
         _playerSetRenderColorMethod = _plugin.State.GetFunction("__lua2cs_player_set_render_color_method");
         _playerCloseMenuMethod = _plugin.State.GetFunction("__lua2cs_player_close_menu_method");
+        _playerSetAmmoMethod = _plugin.State.GetFunction("__lua2cs_player_set_ammo_method");
+        _playerSetScoreMethod = _plugin.State.GetFunction("__lua2cs_player_set_score_method");
+        _playerSetRoundScoreMethod = _plugin.State.GetFunction("__lua2cs_player_set_round_score_method");
+        _playerSetMvpsMethod = _plugin.State.GetFunction("__lua2cs_player_set_mvps_method");
+        _playerSetVoiceFlagsMethod = _plugin.State.GetFunction("__lua2cs_player_set_voice_flags_method");
+        _playerReplicateConVarMethod = _plugin.State.GetFunction("__lua2cs_player_replicate_convar_method");
+        _playerSetFakeConVarMethod = _plugin.State.GetFunction("__lua2cs_player_set_fake_convar_method");
         _playerEmitSoundMethod = _plugin.State.GetFunction("__lua2cs_player_emit_sound_method");
         _entityRefreshMethod = _plugin.State.GetFunction("__lua2cs_entity_refresh_method");
         _entitySpawnMethod = _plugin.State.GetFunction("__lua2cs_entity_spawn_method");
@@ -874,6 +896,86 @@ public sealed class LuaApi : IDisposable
         return true;
     }
 
+    public bool PlayerSetAmmo(long slot, long clip, long reserve)
+    {
+        if (clip is < -1 or > 10000) throw new ArgumentOutOfRangeException(nameof(clip), "弹匣数量必须为 0 到 10000。");
+        if (reserve is < -1 or > 10000) throw new ArgumentOutOfRangeException(nameof(reserve), "备弹数量必须为 0 到 10000。");
+        if (clip == -1 && reserve == -1) throw new ArgumentException("弹匣和备弹不能同时省略。");
+
+        var weapon = ResolveActiveWeapon(slot);
+        if (weapon is null) return false;
+        if (clip >= 0)
+        {
+            weapon.Clip1 = (int)clip;
+            Utilities.SetStateChanged(weapon, "CBasePlayerWeapon", "m_iClip1");
+        }
+        if (reserve >= 0)
+        {
+            weapon.ReserveAmmo[0] = (int)reserve;
+            Utilities.SetStateChanged(weapon, "CBasePlayerWeapon", "m_pReserveAmmo");
+        }
+        return true;
+    }
+
+    public bool PlayerSetScore(long slot, long score)
+    {
+        var parsedScore = ClampCounter(score, nameof(score));
+        var player = ResolvePlayer(slot);
+        if (player is null) return false;
+        player.Score = parsedScore;
+        Utilities.SetStateChanged(player, "CCSPlayerController", "m_iScore");
+        return true;
+    }
+
+    public bool PlayerSetRoundScore(long slot, long score)
+    {
+        var parsedScore = ClampCounter(score, nameof(score));
+        var player = ResolvePlayer(slot);
+        if (player is null) return false;
+        player.RoundScore = parsedScore;
+        Utilities.SetStateChanged(player, "CCSPlayerController", "m_iRoundScore");
+        return true;
+    }
+
+    public bool PlayerSetMvps(long slot, long mvps)
+    {
+        var parsedMvps = ClampCounter(mvps, nameof(mvps));
+        var player = ResolvePlayer(slot);
+        if (player is null) return false;
+        player.MVPs = parsedMvps;
+        Utilities.SetStateChanged(player, "CCSPlayerController", "m_iMVPs");
+        return true;
+    }
+
+    public bool PlayerSetVoiceFlags(long slot, long flags)
+    {
+        if (flags is < 0 or > 31) throw new ArgumentOutOfRangeException(nameof(flags), "语音标志必须为 0 到 31。");
+        var player = ResolvePlayer(slot);
+        if (player is null) return false;
+        player.VoiceFlags = (VoiceFlags)(byte)flags;
+        return true;
+    }
+
+    public bool PlayerReplicateConVar(long slot, string name, string value)
+    {
+        name = ValidateConVarName(name);
+        value = ValidateConVarValue(value);
+        var player = ResolvePlayer(slot);
+        if (player is null) return false;
+        player.ReplicateConVar(name, value);
+        return true;
+    }
+
+    public bool PlayerSetFakeConVar(long slot, string name, string value)
+    {
+        name = ValidateConVarName(name);
+        value = ValidateConVarValue(value);
+        var player = ResolvePlayer(slot);
+        if (player is null || !player.IsBot) return false;
+        player.SetFakeClientConVar(name, value);
+        return true;
+    }
+
     public LuaTable? PlayerGetAimTarget(long slot)
     {
         var player = ResolvePlayer(slot);
@@ -1091,7 +1193,11 @@ public sealed class LuaApi : IDisposable
         table["ping"] = player.Ping;
         table["score"] = player.Score;
         table["round_score"] = player.RoundScore;
+        table["rounds_won"] = player.RoundsWon;
         table["mvps"] = player.MVPs;
+        table["teammate_color"] = player.CompTeammateColor;
+        table["language"] = player.GetLanguage().Name;
+        table["voice_flags"] = (long)player.VoiceFlags;
         table["health"] = pawn?.Health;
         table["max_health"] = pawn?.MaxHealth;
         table["armor"] = pawn?.ArmorValue;
@@ -1109,7 +1215,13 @@ public sealed class LuaApi : IDisposable
         table["gravity_scale"] = pawn?.GravityScale;
         table["flags"] = pawn is null ? null : (long)pawn.Flags;
         table["buttons"] = ReadButtons(pawn);
-        table["active_weapon"] = pawn?.WeaponServices?.ActiveWeapon.Value?.DesignerName;
+        var activeWeapon = pawn?.WeaponServices?.ActiveWeapon.Value is { IsValid: true } validWeapon ? validWeapon : null;
+        table["active_weapon"] = activeWeapon?.DesignerName;
+        if (activeWeapon is not null)
+        {
+            using var activeWeaponTable = CreateWeaponTable(activeWeapon);
+            table["active_weapon_info"] = activeWeaponTable;
+        }
 
         if (pawn?.CBodyComponent?.SceneNode is { } sceneNode)
         {
@@ -1132,16 +1244,22 @@ public sealed class LuaApi : IDisposable
         }
 
         var weapons = NewTable();
+        var weaponDetails = NewTable();
         var weaponIndex = 1;
         if (pawn?.WeaponServices is { } weaponServices)
         {
             foreach (var weapon in weaponServices.MyWeapons.Select(handle => handle.Value).Where(weapon => weapon is { IsValid: true }))
             {
-                weapons[weaponIndex++] = weapon!.DesignerName;
+                weapons[weaponIndex] = weapon!.DesignerName;
+                using var weaponTable = CreateWeaponTable(weapon);
+                weaponDetails[weaponIndex] = weaponTable;
+                weaponIndex++;
             }
         }
         table["weapons"] = weapons;
+        table["weapon_details"] = weaponDetails;
         weapons.Dispose();
+        weaponDetails.Dispose();
 
         table["print_chat"] = _playerChatMethod;
         table["print_console"] = _playerConsoleMethod;
@@ -1174,7 +1292,27 @@ public sealed class LuaApi : IDisposable
         table["set_model"] = _playerSetModelMethod;
         table["set_render_color"] = _playerSetRenderColorMethod;
         table["close_menu"] = _playerCloseMenuMethod;
+        table["set_ammo"] = _playerSetAmmoMethod;
+        table["set_score"] = _playerSetScoreMethod;
+        table["set_round_score"] = _playerSetRoundScoreMethod;
+        table["set_mvps"] = _playerSetMvpsMethod;
+        table["set_voice_flags"] = _playerSetVoiceFlagsMethod;
+        table["replicate_convar"] = _playerReplicateConVarMethod;
+        table["set_fake_convar"] = _playerSetFakeConVarMethod;
         table["emit_sound"] = _playerEmitSoundMethod;
+        return table;
+    }
+
+    private LuaTable CreateWeaponTable(CBasePlayerWeapon weapon)
+    {
+        var table = NewTable();
+        table["handle"] = (long)weapon.EntityHandle.Raw;
+        table["index"] = (long)weapon.Index;
+        table["designer_name"] = weapon.DesignerName;
+        table["clip"] = weapon.Clip1;
+        table["reserve"] = weapon.ReserveAmmo[0];
+        table["reserve_secondary"] = weapon.ReserveAmmo[1];
+        table["item_definition_index"] = weapon.AttributeManager.Item.ItemDefinitionIndex;
         return table;
     }
 
@@ -1232,6 +1370,12 @@ public sealed class LuaApi : IDisposable
     {
         var pawn = ResolvePlayer(slot)?.PlayerPawn.Value;
         return pawn is { IsValid: true } ? pawn : null;
+    }
+
+    private CBasePlayerWeapon? ResolveActiveWeapon(long slot)
+    {
+        var weapon = ResolvePlayerPawn(slot)?.WeaponServices?.ActiveWeapon.Value;
+        return weapon is { IsValid: true } ? weapon : null;
     }
 
     private static CBaseEntity? ResolveEntity(long handle)
@@ -1420,6 +1564,25 @@ public sealed class LuaApi : IDisposable
         return value;
     }
 
+    internal static string ValidateConVarName(string name)
+    {
+        name = name.Trim();
+        if (string.IsNullOrEmpty(name) || name.Length > 128 || name.Any(char.IsWhiteSpace) || name.Any(char.IsControl))
+        {
+            throw new ArgumentException("ConVar 名称必须为 1 到 128 个不含空白或控制字符的字符。", nameof(name));
+        }
+        return name;
+    }
+
+    internal static string ValidateConVarValue(string value)
+    {
+        if (value.Length > 4096 || value.Any(character => character is '\0' or '\r' or '\n'))
+        {
+            throw new ArgumentException("ConVar 值不能包含换行或空字符，长度不能超过 4096。", nameof(value));
+        }
+        return value;
+    }
+
     private static string ValidateDisplayText(string value, string label, int maximumLength)
     {
         if (value.Length > maximumLength || value.Any(character => character is '\0' or '\r' or '\n'))
@@ -1433,6 +1596,12 @@ public sealed class LuaApi : IDisposable
     {
         if (!double.IsFinite(value)) throw new ArgumentOutOfRangeException(parameterName, "参数必须是有限数值。");
         return (float)Math.Clamp(value, minimum, maximum);
+    }
+
+    private static int ClampCounter(long value, string parameterName)
+    {
+        if (value < 0) throw new ArgumentOutOfRangeException(parameterName, "计数值不能为负数。");
+        return (int)Math.Min(value, int.MaxValue);
     }
 
     private static Color CreateColor(long red, long green, long blue, long alpha) => Color.FromArgb(
