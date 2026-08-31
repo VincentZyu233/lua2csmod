@@ -529,16 +529,38 @@ public sealed class LuaRuntimeTests : IDisposable
     }
 
     [Fact]
-    public void ShippedTpaCommandsAreAvailableToEveryPlayerWithoutAcceptArguments()
+    public void ShippedTpaCommandsHaveExpectedAccessAndArguments()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "examples", "tpa.lua");
         using var plugin = new LuaRuntime(NullLogger.Instance, false).Prepare(path);
         var commands = plugin.Registrations.OfType<CommandRegistration>().ToDictionary(item => item.Name);
 
-        Assert.Equal(["css_tpa", "css_tpaccept", "css_tpdeny", "css_tpcancel"], commands.Keys);
+        Assert.Equal("0.3.2", plugin.Version);
+        Assert.Equal(13, plugin.Registrations.Count);
+        Assert.Single(plugin.Registrations.OfType<ListenerRegistration>());
+        Assert.Equal([
+            "css_tpalist",
+            "css_tpa",
+            "css_tpaid",
+            "css_tpaslot",
+            "css_tpaname",
+            "css_tpahere",
+            "css_tpahereid",
+            "css_tpahereslot",
+            "css_tpaherename",
+            "css_tpaccept",
+            "css_tpdeny",
+            "css_tpcancel"
+        ], commands.Keys);
         Assert.All(commands.Values, command => Assert.True(string.IsNullOrEmpty(command.Permission)));
-        Assert.Equal(1, commands["css_tpa"].MinArgs);
+        Assert.All(commands.Values, command => Assert.False(command.AllowConsole));
+        Assert.Equal(0, commands["css_tpalist"].MinArgs);
+        Assert.All(commands
+            .Where(item => item.Key is not "css_tpalist" and not "css_tpaccept" and not "css_tpdeny" and not "css_tpcancel"),
+            item => Assert.Equal(1, item.Value.MinArgs));
         Assert.Equal(0, commands["css_tpaccept"].MinArgs);
+        Assert.Equal(0, commands["css_tpdeny"].MinArgs);
+        Assert.Equal(0, commands["css_tpcancel"].MinArgs);
     }
 
     [Fact]
