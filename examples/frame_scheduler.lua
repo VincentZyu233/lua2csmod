@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "帧与 Tick 调度示例",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "演示下一帧、下一次世界更新和延迟 Tick 回调"
 })
 
