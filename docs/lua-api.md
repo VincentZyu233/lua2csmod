@@ -81,6 +81,32 @@ plugin:command("css_ping", function(player, command)
 end)
 ```
 
+## 菜单
+
+```lua
+cs.menu.open(player, {
+    title = "选择功能",
+    type = "chat",
+    exit_button = true,
+    post_select = "close",
+    items = {
+        { text = "补满生命" },
+        { text = "暂不可用", disabled = true }
+    }
+}, function(selected_player, index)
+    if index == 1 then selected_player:set_health(100) end
+end)
+```
+
+- `type`：`chat` 在聊天区显示，`console` 在玩家控制台显示。
+- `items`：1 到 64 个选项；`text` 必填，`disabled` 默认为 `false`。
+- `exit_button`：是否显示退出项，默认为 `true`。
+- `post_select`：选择后执行 `close`、`reset` 或 `nothing`，默认为 `reset`。
+- 回调参数是选择选项时的最新玩家快照和从 1 开始的选项索引。
+- `cs.menu.close(player)` 或 `player:close_menu()`：关闭玩家当前的 CSS 菜单；没有活动菜单时返回 `false`。
+
+菜单标题最长 256 字符，选项最长 512 字符，均不允许换行或空字符。插件卸载或热重载时会关闭仍属于该插件的活动菜单，避免旧回调访问已经销毁的 Lua VM。当前只包装聊天和控制台菜单；中央 HTML 菜单需要额外的 Tick Listener 生命周期，暂不开放。
+
 ## 定时器
 
 ```lua
@@ -188,6 +214,14 @@ end
 
 返回值是调用时的只读快照。需要最新状态时应重新调用，而不是长期保存旧表。
 
+管理员脚本可以主动结束回合：
+
+```lua
+cs.game.terminate_round(1, cs.round_end.ct_win)
+```
+
+延迟必须是 0 到 60 秒。常用原因位于 `cs.round_end`：`target_bombed`、`bomb_defused`、`ct_win`、`terrorist_win`、`draw`、`all_hostages_rescued`、`target_saved` 和 `game_commencing`。接口成功提交时返回 `true`；游戏规则实体尚未就绪时返回 `false`。结束回合会立即改变比赛流程，只应由受信任的管理命令调用。
+
 ## 持久化存储
 
 ```lua
@@ -259,12 +293,16 @@ local targets = cs.players.target("@alive", caller)
 - `ping`：延迟。
 - `score`、`round_score`、`mvps`：计分板数据。
 - `health`、`armor`、`money`：生命、护甲和金钱；无有效 Pawn 时可能为 `nil`。
+- `max_health`、`gravity_scale`、`velocity_modifier`：最大生命、重力比例和受击移动速度倍率。
 - `has_helmet`、`has_defuser`：是否有头盔或拆弹器。
 - `in_buy_zone`、`in_bomb_zone`：是否位于购买区或炸弹区。
+- `is_scoped`、`is_defusing`、`is_grabbing_hostage`、`is_walking`：瞄准镜、拆弹、人质和行走状态。
+- `shots_fired`、`flags`：连续射击计数和实体标志位。
 - `buttons`：当前按键位掩码，可结合 `cs.buttons` 判断。
 - `position`、`velocity`、`eye_angles`：包含 `x`、`y`、`z` 的向量表。
 - `active_weapon`：当前武器的 Designer Name，可能为 `nil`。
 - `weapons`：当前持有武器的 Designer Name 数组。
+- `model`、`render_color`：当前模型路径和包含 `red/green/blue/alpha` 的渲染颜色。
 
 玩家方法：
 
@@ -286,6 +324,13 @@ local targets = cs.players.target("@alive", caller)
 - `player:switch_team(team)`：强制换队并保留存活状态和装备。
 - `player:teleport(position, angles, velocity)`：三个参数均可为 `nil`，但至少提供一个向量。
 - `player:set_health(value)`、`player:set_armor(value)`、`player:set_money(value)`
+- `player:aim_target()`：返回准星所指玩家的最新快照；没有玩家目标或游戏规则未就绪时返回 `nil`。
+- `player:set_max_health(value)`：设置最大生命，限制为至少 1。
+- `player:set_gravity(scale)`：设置重力比例，限制为 0 到 10。
+- `player:set_velocity_modifier(value)`：设置受击移动速度倍率，限制为 0 到 10；游戏逻辑可能随后重置。
+- `player:set_model(model_name, precache)`：设置玩家模型；`precache` 默认为 `true`。
+- `player:set_render_color(red, green, blue, alpha)`：设置 Pawn 渲染颜色，各通道限制为 0 到 255，透明度默认为 255。
+- `player:close_menu()`：关闭当前 CSS 菜单。
 - `player:emit_sound(sound_event_name, volume, pitch)`：只向该玩家播放声音事件；音量默认为 1，音调默认为 0，返回声音实体 GUID，失败返回 0。
 
 修改方法在成功找到有效玩家或 Pawn 时返回 `true`，否则返回 `false`。无返回结果的 CSS 底层操作只能表示已成功提交，不能保证游戏规则不会随后覆盖该状态。
@@ -313,7 +358,7 @@ end
 - `cs.entities.get(index)`：按当前实体索引获取快照；索引无效时返回 `nil`。
 - `cs.entities.create(designer_name, spawn)`：创建实体，`spawn` 默认为 `true`；失败返回 `nil`。Designer Name 只允许 ASCII 字母、数字和下划线。
 
-实体快照字段包括 `handle`、`index`、`designer_name`、`name`、`health`、`team_id`、`position`、`rotation` 和 `velocity`。部分实体没有名字或坐标，对应字段可能为 `nil`。
+实体快照字段包括 `handle`、`index`、`designer_name`、`name`、`health`、`max_health`、`team_id`、`gravity_scale`、`flags`、`spawn_flags`、`position`、`rotation` 和 `velocity`。部分实体没有名字或坐标，对应字段可能为 `nil`。
 
 实体方法：
 
@@ -323,11 +368,15 @@ end
 - `entity:remove(delay)`：立即或延迟删除实体。
 - `entity:teleport(position, angles, velocity)`：三个向量均可为 `nil`，但至少提供一个。
 - `entity:set_health(value)`：设置生命值并通知网络状态变化。
+- `entity:set_max_health(value)`：设置最大生命值。
+- `entity:set_gravity(scale)`：设置 0 到 10 的重力比例。
+- `entity:set_model(model_name, precache)`：为模型实体设置模型；`precache` 默认为 `true`。
+- `entity:set_render_color(red, green, blue, alpha)`：为模型实体设置渲染颜色。
 - `entity:emit_sound(sound_event_name, volume, pitch)`：从实体播放声音，返回声音实体 GUID，失败返回 0。
 
 实体表保存的是包含索引和序列号的完整 32 位 CHandle，而不是裸索引；实体被删除并复用索引后，旧表的方法会返回失败，不会操作新实体。延迟参数限制为 0 到 3600 秒；声音音量会限制在 0 到 1，音调会限制在 0 到 255，且不接受 `NaN` 或无穷。
 
-实体创建、重复生成、删除和任意 I/O 输入可能破坏地图逻辑、导致崩服或制造无法清理的实体，只应允许受信任脚本使用。`create(..., false)` 创建的实体不会自动 DispatchSpawn，调用者完成生成前配置后需要调用 `entity:spawn()`；不得对已经生成的实体重复调用。
+实体创建、重复生成、删除、模型修改和任意 I/O 输入可能破坏地图逻辑、导致崩服或制造无法清理的实体，只应允许受信任脚本使用。`create(..., false)` 创建的实体不会自动 DispatchSpawn，调用者完成生成前配置后需要调用 `entity:spawn()`；不得对已经生成的实体重复调用。CounterStrikeSharp 目前不能可靠查询任意实体的 C++ 继承关系，因此只有明确知道目标属于 `CBaseModelEntity` 时才能调用实体的 `set_model` 和 `set_render_color`；不确定时不要调用。
 
 ## 向量、队伍与按键
 
@@ -344,6 +393,22 @@ local is_jumping = (player.buttons & cs.buttons.jump) ~= 0
 `cs.team` 包含 `none`、`spectator`、`terrorist`/`t`、`counter_terrorist`/`ct`。换队方法也接受字符串 `none`、`spec`、`t`、`ct` 或数字 0 到 3。
 
 `cs.buttons` 包含 `attack`、`jump`、`duck`、`forward`、`back`、`use`、`left`、`right`、`move_left`、`move_right`、`attack2`、`reload`、`speed`、`walk`、`zoom`、`scoreboard` 和 `inspect`。
+
+## 导航网格
+
+```lua
+local area = cs.nav.closest(player.position, 512)
+if area ~= nil then
+    cs.log.info("最近导航区域：" .. area.id .. "，距离：" .. area.distance)
+end
+
+local first_areas = cs.nav.areas(128)
+```
+
+- `cs.nav.closest(position, maximum_distance)`：返回最近导航区域，默认不限制距离；没有可用导航网格或指定范围内无结果时返回 `nil`。
+- `cs.nav.areas(limit)`：返回当前地图的导航区域数组，默认最多 1024 个，限制为 1 到 4096。
+
+导航区域字段包括 `id`、`center`、`normal`、`min`、`max`、`width`、`height` 和 `area_2d`；`closest` 还会提供 `distance`。地图切换后旧快照只剩普通数值，不应视为新地图的有效区域。枚举全部导航区域有一定开销，不要在 `OnTick` 中反复调用。
 
 ## 能力发现
 
@@ -409,5 +474,10 @@ scripts/
 | `target_tools.lua` | 按 CSS 目标语法批量设置护甲 | 原生目标选择、免疫检查 |
 | `game_status.lua` | 查询回合阶段与比分 | 游戏规则快照 |
 | `entity_tools.lua` | 查询实体并发送 I/O 输入 | 实体快照、完整句柄、实体输入 |
+| `menu_demo.lua` | 打开聊天菜单并处理选择 | 菜单、回调、玩家操作 |
+| `movement_fun.lua` | 批量调整重力和速度倍率 | 原生目标选择、玩家移动参数 |
+| `nav_tools.lua` | 查询玩家附近导航区域 | 坐标、导航网格 |
+| `round_control.lua` | 管理员主动结束回合 | 游戏规则、回合结束原因 |
+| `model_tools.lua` | 批量设置模型和渲染颜色 | 玩家模型、预缓存、颜色 |
 
 安装包中的模板位于 `addons/counterstrikesharp/plugins/Lua2CS/examples`。复制需要启用的顶层模板到同级 `scripts` 目录；`module_demo.lua` 还需要同时复制 `modules` 子目录。

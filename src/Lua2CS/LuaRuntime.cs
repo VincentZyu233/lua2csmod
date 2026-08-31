@@ -32,6 +32,11 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         local capability_events = __lua2cs_capability_events
         local capability_listeners = __lua2cs_capability_listeners
         local game_rules = __lua2cs_game_rules
+        local game_terminate_round = __lua2cs_game_terminate_round
+        local nav_areas = __lua2cs_nav_areas
+        local nav_closest = __lua2cs_nav_closest
+        local menu_open = __lua2cs_menu_open
+        local menu_close = __lua2cs_menu_close
         local storage_get = __lua2cs_storage_get
         local storage_has = __lua2cs_storage_has
         local storage_set_string = __lua2cs_storage_set_string
@@ -50,6 +55,10 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         local entity_remove = __lua2cs_entity_remove
         local entity_teleport = __lua2cs_entity_teleport
         local entity_set_health = __lua2cs_entity_set_health
+        local entity_set_max_health = __lua2cs_entity_set_max_health
+        local entity_set_gravity = __lua2cs_entity_set_gravity
+        local entity_set_model = __lua2cs_entity_set_model
+        local entity_set_render_color = __lua2cs_entity_set_render_color
         local entity_emit_sound = __lua2cs_entity_emit_sound
         local players_all = __lua2cs_players_all
         local players_get = __lua2cs_players_get
@@ -83,6 +92,12 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         local player_set_health = __lua2cs_player_set_health
         local player_set_armor = __lua2cs_player_set_armor
         local player_set_money = __lua2cs_player_set_money
+        local player_aim_target = __lua2cs_player_aim_target
+        local player_set_max_health = __lua2cs_player_set_max_health
+        local player_set_gravity = __lua2cs_player_set_gravity
+        local player_set_velocity_modifier = __lua2cs_player_set_velocity_modifier
+        local player_set_model = __lua2cs_player_set_model
+        local player_set_render_color = __lua2cs_player_set_render_color
         local player_emit_sound = __lua2cs_player_emit_sound
         local command_reply = __lua2cs_command_reply
 
@@ -130,7 +145,20 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
                 listeners = capability_listeners
             },
             game = {
-                rules = game_rules
+                rules = game_rules,
+                terminate_round = game_terminate_round
+            },
+            nav = {
+                areas = function(limit)
+                    return nav_areas(limit or 1024)
+                end,
+                closest = function(position, maximum_distance)
+                    return nav_closest(position, maximum_distance or -1)
+                end
+            },
+            menu = {
+                open = menu_open,
+                close = menu_close
             },
             storage = {},
             entities = {
@@ -150,6 +178,16 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
                 t = 2,
                 counter_terrorist = 3,
                 ct = 3
+            },
+            round_end = {
+                target_bombed = "target_bombed",
+                bomb_defused = "bomb_defused",
+                ct_win = "ct_win",
+                terrorist_win = "terrorist_win",
+                draw = "draw",
+                all_hostages_rescued = "all_hostages_rescued",
+                target_saved = "target_saved",
+                game_commencing = "game_commencing"
             },
             buttons = {
                 attack = 1 << 0,
@@ -399,6 +437,43 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
             return slot ~= nil and player_set_money(slot, money) or false
         end
 
+        function __lua2cs_player_aim_target_method(self)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_aim_target(slot) or nil
+        end
+
+        function __lua2cs_player_set_max_health_method(self, health)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_set_max_health(slot, health) or false
+        end
+
+        function __lua2cs_player_set_gravity_method(self, scale)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_set_gravity(slot, scale) or false
+        end
+
+        function __lua2cs_player_set_velocity_modifier_method(self, modifier)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_set_velocity_modifier(slot, modifier) or false
+        end
+
+        function __lua2cs_player_set_model_method(self, model_name, precache)
+            local slot = current_player_slot(self)
+            if slot == nil then return false end
+            if precache == nil then precache = true end
+            return player_set_model(slot, model_name, precache)
+        end
+
+        function __lua2cs_player_set_render_color_method(self, red, green, blue, alpha)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_set_render_color(slot, red, green, blue, alpha or 255) or false
+        end
+
+        function __lua2cs_player_close_menu_method(self)
+            if current_player_slot(self) == nil then return false end
+            return menu_close(self)
+        end
+
         function __lua2cs_player_emit_sound_method(self, sound_event_name, volume, pitch)
             local slot = current_player_slot(self)
             if slot == nil then return 0 end
@@ -427,6 +502,23 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
 
         function __lua2cs_entity_set_health_method(self, health)
             return entity_set_health(self.handle, health)
+        end
+
+        function __lua2cs_entity_set_max_health_method(self, health)
+            return entity_set_max_health(self.handle, health)
+        end
+
+        function __lua2cs_entity_set_gravity_method(self, scale)
+            return entity_set_gravity(self.handle, scale)
+        end
+
+        function __lua2cs_entity_set_model_method(self, model_name, precache)
+            if precache == nil then precache = true end
+            return entity_set_model(self.handle, model_name, precache)
+        end
+
+        function __lua2cs_entity_set_render_color_method(self, red, green, blue, alpha)
+            return entity_set_render_color(self.handle, red, green, blue, alpha or 255)
         end
 
         function __lua2cs_entity_emit_sound_method(self, sound_event_name, volume, pitch)
@@ -464,6 +556,11 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         __lua2cs_capability_events = nil
         __lua2cs_capability_listeners = nil
         __lua2cs_game_rules = nil
+        __lua2cs_game_terminate_round = nil
+        __lua2cs_nav_areas = nil
+        __lua2cs_nav_closest = nil
+        __lua2cs_menu_open = nil
+        __lua2cs_menu_close = nil
         __lua2cs_storage_get = nil
         __lua2cs_storage_has = nil
         __lua2cs_storage_set_string = nil
@@ -482,6 +579,10 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         __lua2cs_entity_remove = nil
         __lua2cs_entity_teleport = nil
         __lua2cs_entity_set_health = nil
+        __lua2cs_entity_set_max_health = nil
+        __lua2cs_entity_set_gravity = nil
+        __lua2cs_entity_set_model = nil
+        __lua2cs_entity_set_render_color = nil
         __lua2cs_entity_emit_sound = nil
         __lua2cs_players_all = nil
         __lua2cs_players_get = nil
@@ -515,6 +616,12 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         __lua2cs_player_set_health = nil
         __lua2cs_player_set_armor = nil
         __lua2cs_player_set_money = nil
+        __lua2cs_player_aim_target = nil
+        __lua2cs_player_set_max_health = nil
+        __lua2cs_player_set_gravity = nil
+        __lua2cs_player_set_velocity_modifier = nil
+        __lua2cs_player_set_model = nil
+        __lua2cs_player_set_render_color = nil
         __lua2cs_player_emit_sound = nil
         __lua2cs_command_reply = nil
         """;
@@ -590,6 +697,11 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         Register(state, api, "__lua2cs_capability_events", nameof(LuaApi.GetEventNames));
         Register(state, api, "__lua2cs_capability_listeners", nameof(LuaApi.GetListenerNames));
         Register(state, api, "__lua2cs_game_rules", nameof(LuaApi.GetGameRules));
+        Register(state, api, "__lua2cs_game_terminate_round", nameof(LuaApi.TerminateRound));
+        Register(state, api, "__lua2cs_nav_areas", nameof(LuaApi.GetNavAreas));
+        Register(state, api, "__lua2cs_nav_closest", nameof(LuaApi.GetClosestNavArea));
+        Register(state, api, "__lua2cs_menu_open", nameof(LuaApi.OpenMenu));
+        Register(state, api, "__lua2cs_menu_close", nameof(LuaApi.CloseMenu));
         Register(state, api, "__lua2cs_storage_get", nameof(LuaApi.StorageGet));
         Register(state, api, "__lua2cs_storage_has", nameof(LuaApi.StorageHas));
         Register(state, api, "__lua2cs_storage_set_string", nameof(LuaApi.StorageSetString));
@@ -608,6 +720,10 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         Register(state, api, "__lua2cs_entity_remove", nameof(LuaApi.EntityRemove));
         Register(state, api, "__lua2cs_entity_teleport", nameof(LuaApi.EntityTeleport));
         Register(state, api, "__lua2cs_entity_set_health", nameof(LuaApi.EntitySetHealth));
+        Register(state, api, "__lua2cs_entity_set_max_health", nameof(LuaApi.EntitySetMaxHealth));
+        Register(state, api, "__lua2cs_entity_set_gravity", nameof(LuaApi.EntitySetGravity));
+        Register(state, api, "__lua2cs_entity_set_model", nameof(LuaApi.EntitySetModel));
+        Register(state, api, "__lua2cs_entity_set_render_color", nameof(LuaApi.EntitySetRenderColor));
         Register(state, api, "__lua2cs_entity_emit_sound", nameof(LuaApi.EntityEmitSound));
         Register(state, api, "__lua2cs_players_all", nameof(LuaApi.GetPlayers));
         Register(state, api, "__lua2cs_players_get", nameof(LuaApi.GetPlayer));
@@ -641,6 +757,12 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         Register(state, api, "__lua2cs_player_set_health", nameof(LuaApi.PlayerSetHealth));
         Register(state, api, "__lua2cs_player_set_armor", nameof(LuaApi.PlayerSetArmor));
         Register(state, api, "__lua2cs_player_set_money", nameof(LuaApi.PlayerSetMoney));
+        Register(state, api, "__lua2cs_player_aim_target", nameof(LuaApi.PlayerGetAimTarget));
+        Register(state, api, "__lua2cs_player_set_max_health", nameof(LuaApi.PlayerSetMaxHealth));
+        Register(state, api, "__lua2cs_player_set_gravity", nameof(LuaApi.PlayerSetGravity));
+        Register(state, api, "__lua2cs_player_set_velocity_modifier", nameof(LuaApi.PlayerSetVelocityModifier));
+        Register(state, api, "__lua2cs_player_set_model", nameof(LuaApi.PlayerSetModel));
+        Register(state, api, "__lua2cs_player_set_render_color", nameof(LuaApi.PlayerSetRenderColor));
         Register(state, api, "__lua2cs_player_emit_sound", nameof(LuaApi.PlayerEmitSound));
         Register(state, api, "__lua2cs_command_reply", nameof(LuaApi.CommandReply));
     }

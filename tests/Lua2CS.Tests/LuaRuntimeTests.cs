@@ -180,6 +180,10 @@ public sealed class LuaRuntimeTests : IDisposable
             assert(cs.storage.get ~= nil and cs.storage.set ~= nil)
             assert(cs.players.target ~= nil)
             assert(cs.entities.find ~= nil and cs.entities.get ~= nil and cs.entities.create ~= nil)
+            assert(cs.game.terminate_round ~= nil)
+            assert(cs.nav.areas ~= nil and cs.nav.closest ~= nil)
+            assert(cs.menu.open ~= nil and cs.menu.close ~= nil)
+            assert(cs.round_end.ct_win == "ct_win")
             assert(cs.team.t == 2 and cs.team.ct == 3)
             assert(cs.buttons.jump == 2)
 
@@ -208,6 +212,10 @@ public sealed class LuaRuntimeTests : IDisposable
             assert(__lua2cs_entities_find == nil)
             assert(__lua2cs_entity_spawn == nil)
             assert(__lua2cs_entity_remove == nil)
+            assert(__lua2cs_nav_closest == nil)
+            assert(__lua2cs_menu_open == nil)
+            assert(__lua2cs_player_set_model_method == nil)
+            assert(__lua2cs_entity_set_gravity_method == nil)
             """);
 
         using var plugin = new LuaRuntime(NullLogger.Instance, false).Prepare(path);
@@ -312,6 +320,28 @@ public sealed class LuaRuntimeTests : IDisposable
     public void InvalidTeamNamesAreRejected(object source) =>
         Assert.Throws<ArgumentException>(() => LuaApi.ParseTeam(source));
 
+    [Theory]
+    [InlineData("ct_win", CounterStrikeSharp.API.Modules.Entities.Constants.RoundEndReason.CTsWin)]
+    [InlineData("T", CounterStrikeSharp.API.Modules.Entities.Constants.RoundEndReason.TerroristsWin)]
+    [InlineData("bomb_defused", CounterStrikeSharp.API.Modules.Entities.Constants.RoundEndReason.BombDefused)]
+    [InlineData("round_draw", CounterStrikeSharp.API.Modules.Entities.Constants.RoundEndReason.RoundDraw)]
+    public void RoundEndReasonsAreParsed(string source, CounterStrikeSharp.API.Modules.Entities.Constants.RoundEndReason expected) =>
+        Assert.Equal(expected, LuaApi.ParseRoundEndReason(source));
+
+    [Theory]
+    [InlineData("close", CounterStrikeSharp.API.Modules.Menu.PostSelectAction.Close)]
+    [InlineData("reset", CounterStrikeSharp.API.Modules.Menu.PostSelectAction.Reset)]
+    [InlineData("keep", CounterStrikeSharp.API.Modules.Menu.PostSelectAction.Nothing)]
+    public void MenuPostSelectActionsAreParsed(string source, CounterStrikeSharp.API.Modules.Menu.PostSelectAction expected) =>
+        Assert.Equal(expected, LuaApi.ParsePostSelectAction(source));
+
+    [Fact]
+    public void InvalidRoundAndMenuValuesAreRejected()
+    {
+        Assert.Throws<ArgumentException>(() => LuaApi.ParseRoundEndReason("invalid"));
+        Assert.Throws<ArgumentException>(() => LuaApi.ParsePostSelectAction("invalid"));
+    }
+
     [Fact]
     public void FailedDynamicRegistrationIsRemovedAgain()
     {
@@ -371,6 +401,11 @@ public sealed class LuaRuntimeTests : IDisposable
     [InlineData("target_tools.lua")]
     [InlineData("game_status.lua")]
     [InlineData("entity_tools.lua")]
+    [InlineData("menu_demo.lua")]
+    [InlineData("movement_fun.lua")]
+    [InlineData("nav_tools.lua")]
+    [InlineData("round_control.lua")]
+    [InlineData("model_tools.lua")]
     public void ShippedExamplesLoad(string fileName)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "examples", fileName);

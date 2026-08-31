@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Drawing;
 using System.Globalization;
 using System.Reflection;
 using System.Text;
@@ -11,7 +12,9 @@ using CounterStrikeSharp.API.Modules.Commands;
 using CounterStrikeSharp.API.Modules.Commands.Targeting;
 using CounterStrikeSharp.API.Modules.Cvars;
 using CounterStrikeSharp.API.Modules.Entities;
+using CounterStrikeSharp.API.Modules.Entities.Constants;
 using CounterStrikeSharp.API.Modules.Events;
+using CounterStrikeSharp.API.Modules.Menu;
 using CounterStrikeSharp.API.Modules.Utils;
 using CounterStrikeSharp.API.ValveConstants.Protobuf;
 using Lua2CS.Bindings;
@@ -21,7 +24,7 @@ using LuaRegistry = KeraLua.LuaRegistry;
 
 namespace Lua2CS;
 
-public sealed class LuaApi
+public sealed class LuaApi : IDisposable
 {
     private static readonly JsonSerializerOptions StorageJsonOptions = new()
     {
@@ -55,6 +58,13 @@ public sealed class LuaApi
         "__lua2cs_player_set_health_method",
         "__lua2cs_player_set_armor_method",
         "__lua2cs_player_set_money_method",
+        "__lua2cs_player_aim_target_method",
+        "__lua2cs_player_set_max_health_method",
+        "__lua2cs_player_set_gravity_method",
+        "__lua2cs_player_set_velocity_modifier_method",
+        "__lua2cs_player_set_model_method",
+        "__lua2cs_player_set_render_color_method",
+        "__lua2cs_player_close_menu_method",
         "__lua2cs_player_emit_sound_method",
         "__lua2cs_entity_refresh_method",
         "__lua2cs_entity_spawn_method",
@@ -62,12 +72,17 @@ public sealed class LuaApi
         "__lua2cs_entity_remove_method",
         "__lua2cs_entity_teleport_method",
         "__lua2cs_entity_set_health_method",
+        "__lua2cs_entity_set_max_health_method",
+        "__lua2cs_entity_set_gravity_method",
+        "__lua2cs_entity_set_model_method",
+        "__lua2cs_entity_set_render_color_method",
         "__lua2cs_entity_emit_sound_method",
         "__lua2cs_command_reply_method"
     ];
 
     private readonly ILogger _logger;
     private readonly Dictionary<long, CommandInfo> _commandContexts = [];
+    private readonly Dictionary<nint, BaseMenu> _ownedMenus = [];
     private readonly LuaPlugin _plugin;
     private long _nextCommandContextId;
     private LuaFunction? _playerChatMethod;
@@ -94,6 +109,13 @@ public sealed class LuaApi
     private LuaFunction? _playerSetHealthMethod;
     private LuaFunction? _playerSetArmorMethod;
     private LuaFunction? _playerSetMoneyMethod;
+    private LuaFunction? _playerAimTargetMethod;
+    private LuaFunction? _playerSetMaxHealthMethod;
+    private LuaFunction? _playerSetGravityMethod;
+    private LuaFunction? _playerSetVelocityModifierMethod;
+    private LuaFunction? _playerSetModelMethod;
+    private LuaFunction? _playerSetRenderColorMethod;
+    private LuaFunction? _playerCloseMenuMethod;
     private LuaFunction? _playerEmitSoundMethod;
     private LuaFunction? _entityRefreshMethod;
     private LuaFunction? _entitySpawnMethod;
@@ -101,6 +123,10 @@ public sealed class LuaApi
     private LuaFunction? _entityRemoveMethod;
     private LuaFunction? _entityTeleportMethod;
     private LuaFunction? _entitySetHealthMethod;
+    private LuaFunction? _entitySetMaxHealthMethod;
+    private LuaFunction? _entitySetGravityMethod;
+    private LuaFunction? _entitySetModelMethod;
+    private LuaFunction? _entitySetRenderColorMethod;
     private LuaFunction? _entityEmitSoundMethod;
     private LuaFunction? _commandReplyMethod;
 
@@ -141,6 +167,13 @@ public sealed class LuaApi
         _playerSetHealthMethod = _plugin.State.GetFunction("__lua2cs_player_set_health_method");
         _playerSetArmorMethod = _plugin.State.GetFunction("__lua2cs_player_set_armor_method");
         _playerSetMoneyMethod = _plugin.State.GetFunction("__lua2cs_player_set_money_method");
+        _playerAimTargetMethod = _plugin.State.GetFunction("__lua2cs_player_aim_target_method");
+        _playerSetMaxHealthMethod = _plugin.State.GetFunction("__lua2cs_player_set_max_health_method");
+        _playerSetGravityMethod = _plugin.State.GetFunction("__lua2cs_player_set_gravity_method");
+        _playerSetVelocityModifierMethod = _plugin.State.GetFunction("__lua2cs_player_set_velocity_modifier_method");
+        _playerSetModelMethod = _plugin.State.GetFunction("__lua2cs_player_set_model_method");
+        _playerSetRenderColorMethod = _plugin.State.GetFunction("__lua2cs_player_set_render_color_method");
+        _playerCloseMenuMethod = _plugin.State.GetFunction("__lua2cs_player_close_menu_method");
         _playerEmitSoundMethod = _plugin.State.GetFunction("__lua2cs_player_emit_sound_method");
         _entityRefreshMethod = _plugin.State.GetFunction("__lua2cs_entity_refresh_method");
         _entitySpawnMethod = _plugin.State.GetFunction("__lua2cs_entity_spawn_method");
@@ -148,6 +181,10 @@ public sealed class LuaApi
         _entityRemoveMethod = _plugin.State.GetFunction("__lua2cs_entity_remove_method");
         _entityTeleportMethod = _plugin.State.GetFunction("__lua2cs_entity_teleport_method");
         _entitySetHealthMethod = _plugin.State.GetFunction("__lua2cs_entity_set_health_method");
+        _entitySetMaxHealthMethod = _plugin.State.GetFunction("__lua2cs_entity_set_max_health_method");
+        _entitySetGravityMethod = _plugin.State.GetFunction("__lua2cs_entity_set_gravity_method");
+        _entitySetModelMethod = _plugin.State.GetFunction("__lua2cs_entity_set_model_method");
+        _entitySetRenderColorMethod = _plugin.State.GetFunction("__lua2cs_entity_set_render_color_method");
         _entityEmitSoundMethod = _plugin.State.GetFunction("__lua2cs_entity_emit_sound_method");
         _commandReplyMethod = _plugin.State.GetFunction("__lua2cs_command_reply_method");
 
@@ -358,6 +395,43 @@ public sealed class LuaApi
         return true;
     }
 
+    public bool EntitySetMaxHealth(long handle, long health)
+    {
+        var entity = ResolveEntity(handle);
+        if (entity is null) return false;
+        entity.MaxHealth = (int)Math.Clamp(health, 1, int.MaxValue);
+        Utilities.SetStateChanged(entity, "CBaseEntity", "m_iMaxHealth");
+        return true;
+    }
+
+    public bool EntitySetGravity(long handle, double scale)
+    {
+        var entity = ResolveEntity(handle);
+        if (entity is null) return false;
+        entity.GravityScale = ClampFinite(scale, 0, 10, nameof(scale));
+        Utilities.SetStateChanged(entity, "CBaseEntity", "m_flGravityScale");
+        return true;
+    }
+
+    public bool EntitySetModel(long handle, string modelName, bool precache)
+    {
+        var entity = ResolveModelEntity(handle);
+        if (entity is null) return false;
+        modelName = ValidateResourceName(modelName, "模型路径");
+        if (precache) Server.PrecacheModel(modelName);
+        entity.SetModel(modelName);
+        return true;
+    }
+
+    public bool EntitySetRenderColor(long handle, long red, long green, long blue, long alpha)
+    {
+        var entity = ResolveModelEntity(handle);
+        if (entity is null) return false;
+        entity.Render = CreateColor(red, green, blue, alpha);
+        Utilities.SetStateChanged(entity, "CBaseModelEntity", "m_clrRender");
+        return true;
+    }
+
     public long EntityEmitSound(long handle, string soundEventName, double volume, double pitch)
     {
         var entity = ResolveEntity(handle);
@@ -371,8 +445,7 @@ public sealed class LuaApi
 
     public LuaTable? GetGameRules()
     {
-        var rules = Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules")
-            .FirstOrDefault(entity => entity.IsValid)?.GameRules;
+        var rules = ResolveGameRules();
         if (rules is null) return null;
 
         var table = NewTable();
@@ -398,6 +471,122 @@ public sealed class LuaApi
         }
 
         return table;
+    }
+
+    public bool TerminateRound(double delay, string reason)
+    {
+        if (!double.IsFinite(delay) || delay is < 0 or > 60)
+        {
+            throw new ArgumentOutOfRangeException(nameof(delay), "回合结束延迟必须为 0 到 60 秒的有限数值。");
+        }
+
+        var rules = ResolveGameRules();
+        if (rules is null) return false;
+        rules.TerminateRound((float)delay, ParseRoundEndReason(reason));
+        return true;
+    }
+
+    public LuaTable GetNavAreas(long limit)
+    {
+        var table = NewTable();
+        var index = 1;
+        foreach (var area in CCSNavArea.GetAllNavAreas().Take((int)Math.Clamp(limit, 1, 4096)))
+        {
+            using var areaTable = CreateNavAreaTable(area);
+            table[index++] = areaTable;
+        }
+        return table;
+    }
+
+    public LuaTable? GetClosestNavArea(LuaTable? position, double maximumDistance)
+    {
+        if (!double.IsFinite(maximumDistance) || maximumDistance < -1 || maximumDistance > float.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumDistance));
+        }
+
+        var parsed = ReadVector(position) ?? throw new InvalidDataException("导航查询必须提供位置向量。");
+        var area = CCSNavArea.GetClosestNavArea(
+            new Vector(parsed.X, parsed.Y, parsed.Z),
+            out var distance,
+            (float)maximumDistance);
+        if (area is null) return null;
+        var table = CreateNavAreaTable(area);
+        table["distance"] = distance;
+        return table;
+    }
+
+    public bool OpenMenu(LuaTable? playerReference, LuaTable? spec, LuaFunction? callback)
+    {
+        var player = ResolvePlayerReference(playerReference);
+        if (player is null) return false;
+        if (spec is null || callback is null) throw new InvalidDataException("菜单必须提供配置表和回调函数。");
+        var title = ValidateDisplayText(ReadString(spec, "title", required: true), "菜单标题", 256);
+        var type = ReadString(spec, "type", defaultValue: "chat").ToLowerInvariant();
+        BaseMenu menu = type switch
+        {
+            "chat" => new ChatMenu(title),
+            "console" => new ConsoleMenu(title),
+            _ => throw new ArgumentException("菜单 type 必须是 chat 或 console。", nameof(spec))
+        };
+
+        menu.ExitButton = ReadBool(spec, "exit_button", true);
+        menu.PostSelectAction = ParsePostSelectAction(ReadString(spec, "post_select", defaultValue: "reset"));
+        if (spec["items"] is not LuaTable items)
+        {
+            throw new InvalidDataException("菜单必须提供 items 数组。");
+        }
+
+        using (items)
+        {
+            for (var index = 1; index <= 64; index++)
+            {
+                if (items[index] is not LuaTable item) break;
+                using (item)
+                {
+                    var optionIndex = index;
+                    menu.AddMenuOption(
+                        ValidateDisplayText(ReadString(item, "text", required: true), "菜单选项", 512),
+                        (selectedPlayer, _) =>
+                        {
+                            using var selectedPlayerTable = CreatePlayerTable(selectedPlayer);
+                            _plugin.Invoke(callback, selectedPlayerTable, optionIndex);
+                            if (menu.PostSelectAction == PostSelectAction.Close
+                                && _ownedMenus.TryGetValue(selectedPlayer.Handle, out var ownedMenu)
+                                && ReferenceEquals(ownedMenu, menu))
+                            {
+                                _ownedMenus.Remove(selectedPlayer.Handle);
+                            }
+                        },
+                        ReadBool(item, "disabled", false));
+                }
+            }
+        }
+
+        if (menu.MenuOptions.Count == 0) throw new InvalidDataException("菜单至少需要一个选项。");
+        _ownedMenus[player.Handle] = menu;
+        try
+        {
+            menu.Open(player);
+            return true;
+        }
+        catch
+        {
+            if (_ownedMenus.TryGetValue(player.Handle, out var ownedMenu) && ReferenceEquals(ownedMenu, menu))
+            {
+                _ownedMenus.Remove(player.Handle);
+            }
+            throw;
+        }
+    }
+
+    public bool CloseMenu(LuaTable? playerReference)
+    {
+        var player = ResolvePlayerReference(playerReference);
+        if (player is null || MenuManager.GetActiveMenu(player) is null) return false;
+        _ownedMenus.Remove(player.Handle);
+        MenuManager.CloseActiveMenu(player);
+        return true;
     }
 
     public object? StorageGet(string key)
@@ -685,6 +874,61 @@ public sealed class LuaApi
         return true;
     }
 
+    public LuaTable? PlayerGetAimTarget(long slot)
+    {
+        var player = ResolvePlayer(slot);
+        var rules = ResolveGameRules();
+        if (player is null || rules is null) return null;
+        var target = rules.GetClientAimTarget(player);
+        return IsUsablePlayer(target) ? CreatePlayerTable(target!) : null;
+    }
+
+    public bool PlayerSetMaxHealth(long slot, long health)
+    {
+        var pawn = ResolvePlayerPawn(slot);
+        if (pawn is null) return false;
+        pawn.MaxHealth = (int)Math.Clamp(health, 1, int.MaxValue);
+        Utilities.SetStateChanged(pawn, "CBaseEntity", "m_iMaxHealth");
+        return true;
+    }
+
+    public bool PlayerSetGravity(long slot, double scale)
+    {
+        var pawn = ResolvePlayerPawn(slot);
+        if (pawn is null) return false;
+        pawn.GravityScale = ClampFinite(scale, 0, 10, nameof(scale));
+        Utilities.SetStateChanged(pawn, "CBaseEntity", "m_flGravityScale");
+        return true;
+    }
+
+    public bool PlayerSetVelocityModifier(long slot, double modifier)
+    {
+        var pawn = ResolvePlayerPawn(slot);
+        if (pawn is null) return false;
+        pawn.VelocityModifier = ClampFinite(modifier, 0, 10, nameof(modifier));
+        Utilities.SetStateChanged(pawn, "CCSPlayerPawn", "m_flVelocityModifier");
+        return true;
+    }
+
+    public bool PlayerSetModel(long slot, string modelName, bool precache)
+    {
+        var pawn = ResolvePlayerPawn(slot);
+        if (pawn is null) return false;
+        modelName = ValidateResourceName(modelName, "模型路径");
+        if (precache) Server.PrecacheModel(modelName);
+        pawn.SetModel(modelName);
+        return true;
+    }
+
+    public bool PlayerSetRenderColor(long slot, long red, long green, long blue, long alpha)
+    {
+        var pawn = ResolvePlayerPawn(slot);
+        if (pawn is null) return false;
+        pawn.Render = CreateColor(red, green, blue, alpha);
+        Utilities.SetStateChanged(pawn, "CBaseModelEntity", "m_clrRender");
+        return true;
+    }
+
     public long PlayerEmitSound(long slot, string soundEventName, double volume, double pitch)
     {
         var player = ResolvePlayer(slot);
@@ -849,14 +1093,30 @@ public sealed class LuaApi
         table["round_score"] = player.RoundScore;
         table["mvps"] = player.MVPs;
         table["health"] = pawn?.Health;
+        table["max_health"] = pawn?.MaxHealth;
         table["armor"] = pawn?.ArmorValue;
         table["money"] = money;
         table["has_helmet"] = player.PawnHasHelmet;
         table["has_defuser"] = player.PawnHasDefuser;
         table["in_buy_zone"] = pawn?.InBuyZone;
         table["in_bomb_zone"] = pawn?.InBombZone;
+        table["is_scoped"] = pawn?.IsScoped;
+        table["is_defusing"] = pawn?.IsDefusing;
+        table["is_grabbing_hostage"] = pawn?.IsGrabbingHostage;
+        table["is_walking"] = pawn?.IsWalking;
+        table["shots_fired"] = pawn?.ShotsFired;
+        table["velocity_modifier"] = pawn?.VelocityModifier;
+        table["gravity_scale"] = pawn?.GravityScale;
+        table["flags"] = pawn is null ? null : (long)pawn.Flags;
         table["buttons"] = ReadButtons(pawn);
         table["active_weapon"] = pawn?.WeaponServices?.ActiveWeapon.Value?.DesignerName;
+
+        if (pawn?.CBodyComponent?.SceneNode is { } sceneNode)
+        {
+            table["model"] = sceneNode.GetSkeletonInstance().ModelState.ModelName;
+            using var colorTable = CreateColorTable(pawn.Render);
+            table["render_color"] = colorTable;
+        }
 
         if (pawn?.AbsOrigin is { } position)
         {
@@ -907,6 +1167,13 @@ public sealed class LuaApi
         table["set_health"] = _playerSetHealthMethod;
         table["set_armor"] = _playerSetArmorMethod;
         table["set_money"] = _playerSetMoneyMethod;
+        table["aim_target"] = _playerAimTargetMethod;
+        table["set_max_health"] = _playerSetMaxHealthMethod;
+        table["set_gravity"] = _playerSetGravityMethod;
+        table["set_velocity_modifier"] = _playerSetVelocityModifierMethod;
+        table["set_model"] = _playerSetModelMethod;
+        table["set_render_color"] = _playerSetRenderColorMethod;
+        table["close_menu"] = _playerCloseMenuMethod;
         table["emit_sound"] = _playerEmitSoundMethod;
         return table;
     }
@@ -919,7 +1186,11 @@ public sealed class LuaApi
         table["designer_name"] = entity.DesignerName;
         table["name"] = entity.Entity?.Name;
         table["health"] = entity.Health;
+        table["max_health"] = entity.MaxHealth;
         table["team_id"] = entity.TeamNum;
+        table["gravity_scale"] = entity.GravityScale;
+        table["flags"] = (long)entity.Flags;
+        table["spawn_flags"] = (long)entity.Spawnflags;
 
         if (entity.AbsOrigin is { } position)
         {
@@ -940,6 +1211,10 @@ public sealed class LuaApi
         table["remove"] = _entityRemoveMethod;
         table["teleport"] = _entityTeleportMethod;
         table["set_health"] = _entitySetHealthMethod;
+        table["set_max_health"] = _entitySetMaxHealthMethod;
+        table["set_gravity"] = _entitySetGravityMethod;
+        table["set_model"] = _entitySetModelMethod;
+        table["set_render_color"] = _entitySetRenderColorMethod;
         table["emit_sound"] = _entityEmitSoundMethod;
         return table;
     }
@@ -953,12 +1228,29 @@ public sealed class LuaApi
         return IsUsablePlayer(player) ? player : null;
     }
 
+    private CCSPlayerPawn? ResolvePlayerPawn(long slot)
+    {
+        var pawn = ResolvePlayer(slot)?.PlayerPawn.Value;
+        return pawn is { IsValid: true } ? pawn : null;
+    }
+
     private static CBaseEntity? ResolveEntity(long handle)
     {
         if (handle is < 0 or > uint.MaxValue) return null;
         var entity = new CHandle<CBaseEntity>((uint)handle).Value;
         return entity is { IsValid: true } ? entity : null;
     }
+
+    private static CBaseModelEntity? ResolveModelEntity(long handle)
+    {
+        if (handle is < 0 or > uint.MaxValue) return null;
+        var entity = new CHandle<CBaseModelEntity>((uint)handle).Value;
+        return entity is { IsValid: true } ? entity : null;
+    }
+
+    private static CCSGameRules? ResolveGameRules() =>
+        Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules")
+            .FirstOrDefault(entity => entity.IsValid)?.GameRules;
 
     private static void ValidateSoundParameters(double volume, double pitch)
     {
@@ -996,6 +1288,24 @@ public sealed class LuaApi
             using var entityTable = CreateEntityTable(entity);
             table[index++] = entityTable;
         }
+        return table;
+    }
+
+    private LuaTable CreateNavAreaTable(CCSNavArea area)
+    {
+        var table = NewTable();
+        table["id"] = (long)area.Id;
+        table["width"] = area.Width;
+        table["height"] = area.Height;
+        table["area_2d"] = area.Area2D;
+        using var center = CreateVectorTable(area.Center.X, area.Center.Y, area.Center.Z);
+        using var normal = CreateVectorTable(area.Normal.X, area.Normal.Y, area.Normal.Z);
+        using var min = CreateVectorTable(area.Min.X, area.Min.Y, area.Min.Z);
+        using var max = CreateVectorTable(area.Max.X, area.Max.Y, area.Max.Z);
+        table["center"] = center;
+        table["normal"] = normal;
+        table["min"] = min;
+        table["max"] = max;
         return table;
     }
 
@@ -1100,6 +1410,73 @@ public sealed class LuaApi
         return designerName;
     }
 
+    private static string ValidateResourceName(string value, string label)
+    {
+        value = value.Trim();
+        if (string.IsNullOrEmpty(value) || value.Length > 256 || value.Any(char.IsControl))
+        {
+            throw new ArgumentException($"{label}必须为 1 到 256 个非控制字符。", nameof(value));
+        }
+        return value;
+    }
+
+    private static string ValidateDisplayText(string value, string label, int maximumLength)
+    {
+        if (value.Length > maximumLength || value.Any(character => character is '\0' or '\r' or '\n'))
+        {
+            throw new ArgumentException($"{label}不能包含换行或空字符，长度不能超过 {maximumLength}。", nameof(value));
+        }
+        return value;
+    }
+
+    private static float ClampFinite(double value, float minimum, float maximum, string parameterName)
+    {
+        if (!double.IsFinite(value)) throw new ArgumentOutOfRangeException(parameterName, "参数必须是有限数值。");
+        return (float)Math.Clamp(value, minimum, maximum);
+    }
+
+    private static Color CreateColor(long red, long green, long blue, long alpha) => Color.FromArgb(
+        (int)Math.Clamp(alpha, 0, 255),
+        (int)Math.Clamp(red, 0, 255),
+        (int)Math.Clamp(green, 0, 255),
+        (int)Math.Clamp(blue, 0, 255));
+
+    internal static RoundEndReason ParseRoundEndReason(string reason)
+    {
+        var normalized = reason.Trim().Replace("_", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
+        return normalized switch
+        {
+            "targetbombed" or "bombed" => RoundEndReason.TargetBombed,
+            "terroristsescaped" => RoundEndReason.TerroristsEscaped,
+            "ctspreventescape" => RoundEndReason.CTsPreventEscape,
+            "escapingterroristsneutralized" => RoundEndReason.EscapingTerroristsNeutralized,
+            "bombdefused" or "defused" => RoundEndReason.BombDefused,
+            "ctswin" or "ctwin" or "ct" => RoundEndReason.CTsWin,
+            "terroristswin" or "terroristwin" or "twin" or "t" => RoundEndReason.TerroristsWin,
+            "rounddraw" or "draw" => RoundEndReason.RoundDraw,
+            "allhostagerescued" => RoundEndReason.AllHostageRescued,
+            "targetsaved" => RoundEndReason.TargetSaved,
+            "hostagesnotrescued" => RoundEndReason.HostagesNotRescued,
+            "terroristsnotescaped" => RoundEndReason.TerroristsNotEscaped,
+            "gamecommencing" => RoundEndReason.GameCommencing,
+            "terroristssurrender" => RoundEndReason.TerroristsSurrender,
+            "ctssurrender" => RoundEndReason.CTsSurrender,
+            "terroristsplanted" => RoundEndReason.TerroristsPlanted,
+            "ctsreachedhostage" => RoundEndReason.CTsReachedHostage,
+            "survivalwin" => RoundEndReason.SurvivalWin,
+            "survivaldraw" => RoundEndReason.SurvivalDraw,
+            _ => throw new ArgumentException($"未知回合结束原因：{reason}", nameof(reason))
+        };
+    }
+
+    internal static PostSelectAction ParsePostSelectAction(string action) => action.Trim().ToLowerInvariant() switch
+    {
+        "close" => PostSelectAction.Close,
+        "reset" => PostSelectAction.Reset,
+        "nothing" or "keep" => PostSelectAction.Nothing,
+        _ => throw new ArgumentException("菜单 post_select 必须是 close、reset 或 nothing。", nameof(action))
+    };
+
     private LuaTable CreateVectorTable(float x, float y, float z)
     {
         var table = NewTable();
@@ -1109,6 +1486,16 @@ public sealed class LuaApi
         table[1] = x;
         table[2] = y;
         table[3] = z;
+        return table;
+    }
+
+    private LuaTable CreateColorTable(Color color)
+    {
+        var table = NewTable();
+        table["red"] = color.R;
+        table["green"] = color.G;
+        table["blue"] = color.B;
+        table["alpha"] = color.A;
         return table;
     }
 
@@ -1261,6 +1648,21 @@ public sealed class LuaApi
     {
         var value = table[key];
         return value is null ? defaultValue : Convert.ToInt32(value, CultureInfo.InvariantCulture);
+    }
+
+    public void Dispose()
+    {
+        foreach (var instance in MenuManager.GetActiveMenus().Values.OfType<BaseMenuInstance>().ToArray())
+        {
+            if (instance.Menu is BaseMenu menu
+                && _ownedMenus.TryGetValue(instance.Player.Handle, out var ownedMenu)
+                && ReferenceEquals(ownedMenu, menu))
+            {
+                MenuManager.CloseActiveMenu(instance.Player);
+            }
+        }
+        _ownedMenus.Clear();
+        _commandContexts.Clear();
     }
 
     internal sealed class LuaEventSnapshot(

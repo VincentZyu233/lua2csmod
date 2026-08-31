@@ -165,6 +165,7 @@ public sealed class LuaPlugin : IDisposable
 
         Deactivate();
         _disposed = true;
+        Api.Dispose();
         State.Dispose();
     }
 }
