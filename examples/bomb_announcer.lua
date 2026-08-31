@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "炸弹事件播报",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "用中文播报 C4 的关键状态变化"
 })
 

@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "回合伤害统计",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "统计每名玩家在当前回合造成的有效伤害"
 })
 

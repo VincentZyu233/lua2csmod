@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "实体工具",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "查询实体并向实体发送 Source 2 I/O 输入"
 })
 

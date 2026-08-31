@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "计分板工具",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "由管理员修改玩家分数、回合分和 MVP 次数"
 })
 

@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "批量目标工具",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "使用 CounterStrikeSharp 原生目标语法批量操作玩家"
 })
 

@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "回合计时器",
-    version = "1.0.0"
+    version = "0.0.1"
 })
 
 plugin:on("round_start", function(event)

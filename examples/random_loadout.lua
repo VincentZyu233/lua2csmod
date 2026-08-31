@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "随机出生装备",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "每次出生时从预设武器中随机选择一把"
 })
 

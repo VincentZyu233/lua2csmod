@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "玩家状态 HUD",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "定时显示生命、护甲、金钱和当前武器"
 })
 

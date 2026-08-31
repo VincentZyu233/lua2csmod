@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "地图工具",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "查询服务器信息并安全切换地图"
 })
 

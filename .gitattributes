@@ -1,0 +1,2 @@
+# 🌙 将所有 Lua 脚本纳入 GitHub Linguist 语言统计。
+*.lua linguist-language=Lua linguist-detectable=true linguist-vendored=false linguist-generated=false linguist-documentation=false

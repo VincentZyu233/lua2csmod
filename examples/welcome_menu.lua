@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "入服欢迎菜单",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "玩家进入服务器后显示可选择的欢迎菜单"
 })
 

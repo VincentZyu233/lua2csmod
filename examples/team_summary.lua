@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "队伍人数统计",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "统计各队真人、机器人和存活人数"
 })
 

@@ -482,6 +482,7 @@ public sealed class LuaRuntimeTests : IDisposable
     [Theory]
     [InlineData("hello.lua")]
     [InlineData("qwq.lua")]
+    [InlineData("awa.lua")]
     [InlineData("round_timer.lua")]
     [InlineData("admin_tools.lua")]
     [InlineData("spawn_protection.lua")]

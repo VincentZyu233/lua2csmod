@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "准星目标检查",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "查看准星当前指向的玩家"
 })
 

@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "语音工具",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "管理玩家的 CounterStrikeSharp 语音标志"
 })
 

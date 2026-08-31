@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "机器人 ConVar 工具",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "修改机器人报告的客户端 ConVar"
 })
 

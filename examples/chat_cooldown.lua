@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "聊天冷却示例",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "演示 Listener 参数和按玩家保存短期状态"
 })
 

@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "玩家信息",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "查询玩家快照和武器列表"
 })
 
