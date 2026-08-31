@@ -5,7 +5,7 @@
 -- !tpcancel：取消自己当前发出的请求。
 -- <玩家> 支持名字、slot、userid 或 SteamID64；多人匹配时必须写得更完整。
 -- 请求 30 秒后过期；每名请求者同时只能保留一个请求，接收者可收到多个请求。
--- 接受后，请求者会传送到接收者的位置和视角，并清除原有移动速度。
+-- 接受后，请求者会随机落在接收者水平 48 单位外，保持其视角并清除原有移动速度。
 -- 双方必须仍在线且存活，接收者还必须有有效坐标。
 -- 本示例不限制阵营、回合、冻结时间、战斗状态、空中状态或地图边界。
 -- 任一方离服时，相关请求都会自动取消并通知仍在线的一方。
@@ -17,6 +17,7 @@ local plugin = cs.plugin({
 })
 
 local request_timeout = 30
+local teleport_offset = 48
 local next_request_id = 0
 
 -- 请求全部以 SteamID64 关联，不能用 slot 保存长期身份：玩家离服后 slot 会被复用。
@@ -43,6 +44,15 @@ end
 local function notify_online(steam_id, message)
     local player = cs.players.get_steamid(steam_id)
     if player ~= nil then player:print_chat(message) end
+end
+
+local function random_nearby_position(position)
+    local angle = math.random() * math.pi * 2
+    return cs.vec3(
+        position.x + math.cos(angle) * teleport_offset,
+        position.y + math.sin(angle) * teleport_offset,
+        position.z
+    )
 end
 
 local function expire_request(request)
@@ -193,7 +203,8 @@ plugin:command("css_tpaccept", {
     -- 这是娱乐服的宽松传送：不检查阵营、回合/冻结状态、战斗状态、
     -- 导航网格、目标是否在空中或坐标是否处于地图边界内，只要求双方仍有有效位置。
     -- 清零速度可避免请求者把原来的跳跃或坠落动量一并带到目标点。
-    if not sender:teleport(target.position, target.eye_angles, cs.vec3(0, 0, 0)) then
+    local destination = random_nearby_position(target.position)
+    if not sender:teleport(destination, target.eye_angles, cs.vec3(0, 0, 0)) then
         command:reply("传送失败，请稍后重试。")
         return
     end
