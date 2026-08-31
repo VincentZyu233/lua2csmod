@@ -685,6 +685,18 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         __lua2cs_command_reply = nil
         """;
 
+    internal static string ProbeRuntimeVersion()
+    {
+        using var state = new Lua();
+        state.State.Encoding = Encoding.UTF8;
+        var version = state.GetString("_VERSION") ?? string.Empty;
+        if (!version.StartsWith("Lua 5.4", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"需要 Lua 5.4 原生运行库，当前探测结果为 '{version}'。");
+        }
+        return version;
+    }
+
     public LuaPlugin Prepare(string scriptPath)
     {
         var fullPath = Path.GetFullPath(scriptPath);

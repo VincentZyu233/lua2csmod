@@ -17,6 +17,8 @@ Lua2CS 是面向 CounterStrikeSharp 的 Lua 5.4 插件宿主。C# 宿主只需�
 
 两个压缩包都已包含 NLua、KeraLua 及对应系统的 Lua 5.4 原生库，不需要在服务器上额外安装 Lua。Linux 包携带 `liblua54.so`，Windows 包携带 `lua54.dll`，请勿混用。
 
+Lua2CS 在加载时会立即创建临时 Lua VM，检查原生库确实可用且版本为 Lua 5.4。安装后可在服务器控制台执行 `css_lua status`，查看 Lua、CounterStrikeSharp、运行平台、自动重载状态和实际脚本目录。即使 `scripts` 目录为空，这项自检也会执行。
+
 ## 脚本示例
 
 ```lua
@@ -43,13 +45,14 @@ end)
 
 ```text
 css_lua list
+css_lua status
 css_lua load <脚本名>
 css_lua reload <脚本名>
 css_lua unload <脚本名>
 css_lua reload_all
 ```
 
-默认要求 `@css/root` 权限。服务器控制台和 RCON 始终可以使用管理命令。在游戏聊天中也可通过 CounterStrikeSharp 的命令触发方式执行，例如 `!lua list`。
+默认要求 `@css/root` 权限。服务器控制台和 RCON 始终可以使用管理命令。在游戏聊天中也可通过 CounterStrikeSharp 的命令触发方式执行，例如 `!lua list`。`css_lua doctor` 是 `css_lua status` 的别名。
 
 开启自动重载后，修改顶层脚本只会重载对应插件；修改子目录中的公共模块会重载全部 Lua 插件。新脚本会先在独立 VM 中完成语法检查、执行和注册验证，再替换当前版本。重载失败时会保留或恢复旧版本。
 
@@ -99,7 +102,7 @@ Lua 与 C# 之间的字符串统一使用 UTF-8，可直接使用中文插件名
 
 `examples` 中包含 36 个可独立加载的中文模板和 1 个公共模块示例，覆盖基础命令、聊天与冷却、事件统计、回合玩法、管理员工具、玩家间传送请求、菜单、玩家和武器、弹药、计分板、语音、ConVar、实体、导航、模型、持久化、HUD、地图及模块化脚本。模板包含关键流程、快照时效、身份校验和风险点的中文注释。
 
-模板默认不会自动运行；安装包将它们放在插件的 `examples` 目录中。选中模板后复制到同级 `scripts` 目录即可加载，后续保存文件会自动热重载。
+模板默认不会自动运行；首次安装时 `scripts` 目录为空，因此除宿主管理和自检命令外不会改变游戏玩法。安装包将模板放在插件的 `examples` 目录中，选中后复制到同级 `scripts` 目录即可加载，后续保存文件会自动热重载。
 
 完整接口参见 [Lua 脚本接口](docs/lua-api.md)，可运行示例位于 [examples](examples)。
 

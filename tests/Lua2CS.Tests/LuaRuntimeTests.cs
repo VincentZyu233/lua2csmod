@@ -9,6 +9,10 @@ public sealed class LuaRuntimeTests : IDisposable
     public LuaRuntimeTests() => Directory.CreateDirectory(_directory);
 
     [Fact]
+    public void NativeRuntimeProbeConfirmsLua54() =>
+        Assert.StartsWith("Lua 5.4", LuaRuntime.ProbeRuntimeVersion(), StringComparison.Ordinal);
+
+    [Fact]
     public void PrepareLoadsMetadataAndRegistrationDefinitions()
     {
         var path = WriteScript("sample.lua", """

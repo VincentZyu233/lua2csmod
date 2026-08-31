@@ -26,6 +26,7 @@ public sealed class LuaPluginManager : IDisposable
         _logger = logger;
         _scriptsDirectory = Path.GetFullPath(scriptsDirectory);
         _runtime = new LuaRuntime(logger, allowUnsafeLibraries);
+        RuntimeVersion = LuaRuntime.ProbeRuntimeVersion();
         _events = new EventBindings(host);
         _listeners = new ListenerBindings(host);
         _commands = new CommandBindings(host);
@@ -34,6 +35,7 @@ public sealed class LuaPluginManager : IDisposable
     }
 
     public string ScriptsDirectory => _scriptsDirectory;
+    public string RuntimeVersion { get; }
     public IReadOnlyCollection<LuaPlugin> Plugins => _plugins.Values;
 
     public IReadOnlyList<PluginOperationResult> LoadAll()

@@ -14,7 +14,7 @@ public sealed class HotReload : IDisposable
     private readonly HashSet<string> _changedPaths = new(
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private ThreadingTimer? _timer;
-    private bool _disposed;
+    private int _disposed;
 
     public HotReload(LuaPluginManager manager, ILogger logger, int debounceMilliseconds, Action<Action> scheduleOnGameThread)
     {
@@ -26,20 +26,27 @@ public sealed class HotReload : IDisposable
         _watcher = new FileSystemWatcher(manager.ScriptsDirectory, "*")
         {
             IncludeSubdirectories = true,
-            NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime,
-            EnableRaisingEvents = true
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime
         };
         _watcher.Changed += OnChanged;
         _watcher.Created += OnChanged;
         _watcher.Deleted += OnChanged;
         _watcher.Renamed += OnRenamed;
         _watcher.Error += OnError;
+        try
+        {
+            _watcher.EnableRaisingEvents = true;
+        }
+        catch
+        {
+            _watcher.Dispose();
+            throw;
+        }
     }
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _watcher.EnableRaisingEvents = false;
         _watcher.Dispose();
         lock (_sync)
@@ -60,9 +67,10 @@ public sealed class HotReload : IDisposable
 
     private void Queue(string path)
     {
-        if (_disposed || !path.EndsWith(".lua", StringComparison.OrdinalIgnoreCase)) return;
+        if (Volatile.Read(ref _disposed) != 0 || !path.EndsWith(".lua", StringComparison.OrdinalIgnoreCase)) return;
         lock (_sync)
         {
+            if (_disposed != 0) return;
             _changedPaths.Add(Path.GetFullPath(path));
             _timer?.Dispose();
             _timer = new ThreadingTimer(_ => Flush(), null, _debounceMilliseconds, Timeout.Infinite);
@@ -74,7 +82,7 @@ public sealed class HotReload : IDisposable
         string[] paths;
         lock (_sync)
         {
-            if (_disposed) return;
+            if (_disposed != 0) return;
             paths = _changedPaths.ToArray();
             _changedPaths.Clear();
             _timer?.Dispose();
@@ -83,6 +91,7 @@ public sealed class HotReload : IDisposable
 
         _scheduleOnGameThread(() =>
         {
+            if (Volatile.Read(ref _disposed) != 0) return;
             try
             {
                 _manager.RefreshFiles(paths);
@@ -94,6 +103,11 @@ public sealed class HotReload : IDisposable
         });
     }
 
-    private void OnError(object sender, ErrorEventArgs args) =>
-        _logger.LogError(args.GetException(), "Lua script file watcher failed");
+    private void OnError(object sender, ErrorEventArgs args)
+    {
+        if (Volatile.Read(ref _disposed) == 0)
+        {
+            _logger.LogError(args.GetException(), "Lua script file watcher failed");
+        }
+    }
 }
