@@ -35,15 +35,19 @@ public sealed class LuaPluginManager : IDisposable
     public IReadOnlyList<PluginOperationResult> LoadAll()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return Directory.EnumerateFiles(_scriptsDirectory, "*.lua", SearchOption.TopDirectoryOnly)
-            .Where(path => !Path.GetFileName(path).StartsWith('_'))
+        return Directory.EnumerateFiles(_scriptsDirectory, "*", SearchOption.TopDirectoryOnly)
+            .Where(IsStandaloneScript)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Select(path => Load(Path.GetFileNameWithoutExtension(path)))
             .ToArray();
     }
 
     public IReadOnlyList<PluginOperationResult> ReloadAll() => _plugins.Keys
-        .Union(Directory.EnumerateFiles(_scriptsDirectory, "*.lua").Select(path => Path.GetFileNameWithoutExtension(path)!), StringComparer.OrdinalIgnoreCase)
+        .Union(
+            Directory.EnumerateFiles(_scriptsDirectory, "*")
+                .Where(IsStandaloneScript)
+                .Select(path => Path.GetFileNameWithoutExtension(path)!),
+            StringComparer.OrdinalIgnoreCase)
         .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
         .Select(Reload)
         .ToArray();
@@ -54,7 +58,7 @@ public sealed class LuaPluginManager : IDisposable
         key = NormalizeKey(key);
         if (_plugins.ContainsKey(key)) return Reload(key);
 
-        var path = ResolveScriptPath(key);
+        var path = ResolveScriptPath(_scriptsDirectory, key);
         if (!File.Exists(path)) return PluginOperationResult.Fail(key, "脚本文件不存在。");
 
         LuaPlugin? candidate = null;
@@ -85,7 +89,7 @@ public sealed class LuaPluginManager : IDisposable
         key = NormalizeKey(key);
         if (!_plugins.TryGetValue(key, out var current)) return Load(key);
 
-        var path = ResolveScriptPath(key);
+        var path = ResolveScriptPath(_scriptsDirectory, key);
         if (!File.Exists(path)) return Unload(key);
 
         LuaPlugin? candidate = null;
@@ -173,8 +177,7 @@ public sealed class LuaPluginManager : IDisposable
     public void RefreshFiles(IReadOnlyCollection<string> changedPaths)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var reloadAll = changedPaths.Any(path => !Path.GetDirectoryName(Path.GetFullPath(path))!
-            .Equals(_scriptsDirectory, StringComparison.Ordinal));
+        var reloadAll = changedPaths.Any(path => IsModulePath(path, _scriptsDirectory));
 
         if (reloadAll)
         {
@@ -196,6 +199,17 @@ public sealed class LuaPluginManager : IDisposable
             throw new ArgumentException("Invalid Lua plugin name.", nameof(key));
         }
         return key;
+    }
+
+    internal static bool IsStandaloneScript(string path) =>
+        !Path.GetFileName(path).StartsWith('_') && path.EndsWith(".lua", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsModulePath(string path, string scriptsDirectory)
+    {
+        path = Path.GetFullPath(path);
+        scriptsDirectory = Path.GetFullPath(scriptsDirectory);
+        return !Path.GetDirectoryName(path)!.Equals(scriptsDirectory, StringComparison.Ordinal)
+               || !IsStandaloneScript(path);
     }
 
     public void Dispose()
@@ -264,14 +278,21 @@ public sealed class LuaPluginManager : IDisposable
         return Activate(plugin, definition);
     }
 
-    private string ResolveScriptPath(string key)
+    internal static string ResolveScriptPath(string scriptsDirectory, string key)
     {
-        var path = Path.GetFullPath(Path.Combine(_scriptsDirectory, key + ".lua"));
-        if (!Path.GetDirectoryName(path)!.Equals(_scriptsDirectory, StringComparison.Ordinal))
+        scriptsDirectory = Path.GetFullPath(scriptsDirectory);
+        var path = Path.GetFullPath(Path.Combine(scriptsDirectory, key + ".lua"));
+        if (!Path.GetDirectoryName(path)!.Equals(scriptsDirectory, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Script path escapes the configured scripts directory.");
         }
-        return path;
+
+        if (File.Exists(path)) return path;
+        return Directory.EnumerateFiles(scriptsDirectory, "*", SearchOption.TopDirectoryOnly)
+                   .Where(IsStandaloneScript)
+                   .FirstOrDefault(candidate => Path.GetFileNameWithoutExtension(candidate)
+                       .Equals(key, StringComparison.OrdinalIgnoreCase))
+               ?? path;
     }
 
     private static Exception Unwrap(Exception exception)

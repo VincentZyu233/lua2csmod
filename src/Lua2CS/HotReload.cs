@@ -21,7 +21,8 @@ public sealed class HotReload : IDisposable
         _logger = logger;
         _scheduleOnGameThread = scheduleOnGameThread;
         _debounceMilliseconds = Math.Clamp(debounceMilliseconds, 100, 5000);
-        _watcher = new FileSystemWatcher(manager.ScriptsDirectory, "*.lua")
+        // Linux 文件名区分大小写，先监听全部文件，再在 Queue 中统一筛选 .lua。
+        _watcher = new FileSystemWatcher(manager.ScriptsDirectory, "*")
         {
             IncludeSubdirectories = true,
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime,

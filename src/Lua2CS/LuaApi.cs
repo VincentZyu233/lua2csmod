@@ -2,10 +2,13 @@ using System.Collections;
 using System.Globalization;
 using System.Reflection;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Modules.Admin;
 using CounterStrikeSharp.API.Modules.Commands;
+using CounterStrikeSharp.API.Modules.Commands.Targeting;
 using CounterStrikeSharp.API.Modules.Cvars;
 using CounterStrikeSharp.API.Modules.Entities;
 using CounterStrikeSharp.API.Modules.Events;
@@ -20,7 +23,13 @@ namespace Lua2CS;
 
 public sealed class LuaApi
 {
-    private static readonly string[] PlayerMethodNames =
+    private static readonly JsonSerializerOptions StorageJsonOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
+    private static readonly string[] WrapperMethodNames =
     [
         "__lua2cs_player_print_chat",
         "__lua2cs_player_print_console",
@@ -46,6 +55,14 @@ public sealed class LuaApi
         "__lua2cs_player_set_health_method",
         "__lua2cs_player_set_armor_method",
         "__lua2cs_player_set_money_method",
+        "__lua2cs_player_emit_sound_method",
+        "__lua2cs_entity_refresh_method",
+        "__lua2cs_entity_spawn_method",
+        "__lua2cs_entity_input_method",
+        "__lua2cs_entity_remove_method",
+        "__lua2cs_entity_teleport_method",
+        "__lua2cs_entity_set_health_method",
+        "__lua2cs_entity_emit_sound_method",
         "__lua2cs_command_reply_method"
     ];
 
@@ -77,7 +94,20 @@ public sealed class LuaApi
     private LuaFunction? _playerSetHealthMethod;
     private LuaFunction? _playerSetArmorMethod;
     private LuaFunction? _playerSetMoneyMethod;
+    private LuaFunction? _playerEmitSoundMethod;
+    private LuaFunction? _entityRefreshMethod;
+    private LuaFunction? _entitySpawnMethod;
+    private LuaFunction? _entityInputMethod;
+    private LuaFunction? _entityRemoveMethod;
+    private LuaFunction? _entityTeleportMethod;
+    private LuaFunction? _entitySetHealthMethod;
+    private LuaFunction? _entityEmitSoundMethod;
     private LuaFunction? _commandReplyMethod;
+
+    private string StoragePath => Path.Combine(
+        Path.GetDirectoryName(_plugin.ScriptPath)!,
+        ".lua2cs-data",
+        _plugin.Key + ".json");
 
     internal LuaApi(LuaPlugin plugin, ILogger logger)
     {
@@ -111,9 +141,17 @@ public sealed class LuaApi
         _playerSetHealthMethod = _plugin.State.GetFunction("__lua2cs_player_set_health_method");
         _playerSetArmorMethod = _plugin.State.GetFunction("__lua2cs_player_set_armor_method");
         _playerSetMoneyMethod = _plugin.State.GetFunction("__lua2cs_player_set_money_method");
+        _playerEmitSoundMethod = _plugin.State.GetFunction("__lua2cs_player_emit_sound_method");
+        _entityRefreshMethod = _plugin.State.GetFunction("__lua2cs_entity_refresh_method");
+        _entitySpawnMethod = _plugin.State.GetFunction("__lua2cs_entity_spawn_method");
+        _entityInputMethod = _plugin.State.GetFunction("__lua2cs_entity_input_method");
+        _entityRemoveMethod = _plugin.State.GetFunction("__lua2cs_entity_remove_method");
+        _entityTeleportMethod = _plugin.State.GetFunction("__lua2cs_entity_teleport_method");
+        _entitySetHealthMethod = _plugin.State.GetFunction("__lua2cs_entity_set_health_method");
+        _entityEmitSoundMethod = _plugin.State.GetFunction("__lua2cs_entity_emit_sound_method");
         _commandReplyMethod = _plugin.State.GetFunction("__lua2cs_command_reply_method");
 
-        foreach (var name in PlayerMethodNames)
+        foreach (var name in WrapperMethodNames)
         {
             _plugin.State[name] = null;
         }
@@ -220,16 +258,188 @@ public sealed class LuaApi
 
     public string? GetConVar(string name) => ConVar.Find(name.Trim())?.StringValue;
 
-    public bool SetConVar(string name, object? value)
+    public bool SetConVar(string name, string value)
     {
         var conVar = ConVar.Find(name.Trim());
         if (conVar is null) return false;
-        conVar.StringValue = Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+        conVar.StringValue = value;
         return true;
     }
 
     public LuaTable GetEventNames() => CreateStringList(EventBindings.Names.Order(StringComparer.OrdinalIgnoreCase));
     public LuaTable GetListenerNames() => CreateStringList(ListenerBindings.Names.Order(StringComparer.OrdinalIgnoreCase));
+
+    public LuaTable FindEntities(string designerName, long limit)
+    {
+        designerName = designerName.Trim();
+        if (string.IsNullOrEmpty(designerName)) return NewTable();
+        var entities = Utilities.FindAllEntitiesByDesignerName<CBaseEntity>(designerName)
+            .Where(entity => entity.IsValid)
+            .Take((int)Math.Clamp(limit, 1, 512));
+        return CreateEntityList(entities);
+    }
+
+    public LuaTable? GetEntity(long index)
+    {
+        if (index is < 0 or >= Utilities.MaxEntities) return null;
+        var entity = Utilities.GetEntityFromIndex<CBaseEntity>((int)index);
+        return entity is { IsValid: true } ? CreateEntityTable(entity) : null;
+    }
+
+    public LuaTable? CreateEntity(string designerName, bool spawn)
+    {
+        designerName = ValidateDesignerName(designerName);
+        var entity = Utilities.CreateEntityByName<CBaseEntity>(designerName);
+        if (entity is not { IsValid: true }) return null;
+        try
+        {
+            if (spawn) entity.DispatchSpawn();
+            return CreateEntityTable(entity);
+        }
+        catch
+        {
+            if (entity.IsValid) entity.Remove();
+            throw;
+        }
+    }
+
+    public LuaTable? RefreshEntity(long handle)
+    {
+        var entity = ResolveEntity(handle);
+        return entity is null ? null : CreateEntityTable(entity);
+    }
+
+    public bool EntitySpawn(long handle)
+    {
+        var entity = ResolveEntity(handle);
+        if (entity is null) return false;
+        entity.DispatchSpawn();
+        return true;
+    }
+
+    public bool EntityInput(long handle, string inputName, string value, double delay)
+    {
+        var entity = ResolveEntity(handle);
+        if (entity is null || string.IsNullOrWhiteSpace(inputName)) return false;
+        if (!double.IsFinite(delay) || delay is < 0 or > 3600) throw new ArgumentOutOfRangeException(nameof(delay));
+        if (delay > 0) entity.AddEntityIOEvent(inputName.Trim(), value: value, delay: (float)delay);
+        else entity.AcceptInput(inputName.Trim(), value: value);
+        return true;
+    }
+
+    public bool EntityRemove(long handle, double delay)
+    {
+        var entity = ResolveEntity(handle);
+        if (entity is null) return false;
+        if (!double.IsFinite(delay) || delay is < 0 or > 3600) throw new ArgumentOutOfRangeException(nameof(delay));
+        if (delay > 0) entity.AddEntityIOEvent("Kill", delay: (float)delay);
+        else entity.Remove();
+        return true;
+    }
+
+    public bool EntityTeleport(long handle, LuaTable? position, LuaTable? angles, LuaTable? velocity)
+    {
+        var entity = ResolveEntity(handle);
+        if (entity is null) return false;
+        var parsedPosition = ReadVector(position);
+        var parsedAngles = ReadVector(angles);
+        var parsedVelocity = ReadVector(velocity);
+        if (parsedPosition is null && parsedAngles is null && parsedVelocity is null) return false;
+        entity.Teleport(parsedPosition, parsedAngles, parsedVelocity);
+        return true;
+    }
+
+    public bool EntitySetHealth(long handle, long health)
+    {
+        var entity = ResolveEntity(handle);
+        if (entity is null) return false;
+        entity.Health = (int)Math.Clamp(health, 0, int.MaxValue);
+        Utilities.SetStateChanged(entity, "CBaseEntity", "m_iHealth");
+        return true;
+    }
+
+    public long EntityEmitSound(long handle, string soundEventName, double volume, double pitch)
+    {
+        var entity = ResolveEntity(handle);
+        if (entity is null || string.IsNullOrWhiteSpace(soundEventName)) return 0;
+        ValidateSoundParameters(volume, pitch);
+        return entity.EmitSound(
+            soundEventName.Trim(),
+            volume: (float)Math.Clamp(volume, 0, 1),
+            pitch: (float)Math.Clamp(pitch, 0, 255));
+    }
+
+    public LuaTable? GetGameRules()
+    {
+        var rules = Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules")
+            .FirstOrDefault(entity => entity.IsValid)?.GameRules;
+        if (rules is null) return null;
+
+        var table = NewTable();
+        table["freeze_period"] = rules.FreezePeriod;
+        table["warmup_period"] = rules.WarmupPeriod;
+        table["warmup_start_time"] = rules.WarmupPeriodStart;
+        table["warmup_end_time"] = rules.WarmupPeriodEnd;
+        table["round_start_time"] = rules.RoundStartTime;
+        table["game_restart"] = rules.GameRestart;
+        table["game_phase"] = rules.GamePhase;
+        table["total_rounds_played"] = rules.TotalRoundsPlayed;
+        table["overtime_playing"] = rules.OvertimePlaying;
+        table["bomb_planted"] = rules.BombPlanted;
+        table["bomb_dropped"] = rules.BombDropped;
+        table["ct_timeout_active"] = rules.CTTimeOutActive;
+        table["terrorist_timeout_active"] = rules.TerroristTimeOutActive;
+
+        foreach (var team in Utilities.FindAllEntitiesByDesignerName<CCSTeam>("cs_team_manager")
+                     .Where(entity => entity.IsValid))
+        {
+            if (team.TeamNum == (byte)CsTeam.Terrorist) table["terrorist_score"] = team.Score;
+            if (team.TeamNum == (byte)CsTeam.CounterTerrorist) table["ct_score"] = team.Score;
+        }
+
+        return table;
+    }
+
+    public object? StorageGet(string key)
+    {
+        key = ValidateStorageKey(key);
+        var data = LoadStorage();
+        return data.TryGetValue(key, out var value) ? ConvertJsonValue(value) : null;
+    }
+
+    public bool StorageHas(string key) => LoadStorage().ContainsKey(ValidateStorageKey(key));
+
+    public bool StorageSetString(string key, string value) => StorageSetValue(key, value);
+    public bool StorageSetInteger(string key, long value) => StorageSetValue(key, value);
+    public bool StorageSetNumber(string key, double value) => StorageSetValue(key, value);
+    public bool StorageSetBoolean(string key, bool value) => StorageSetValue(key, value);
+
+    private bool StorageSetValue(string key, object value)
+    {
+        key = ValidateStorageKey(key);
+        var data = LoadStorage();
+        data[key] = SerializeStorageValue(value);
+        SaveStorage(data);
+        return true;
+    }
+
+    public bool StorageDelete(string key)
+    {
+        key = ValidateStorageKey(key);
+        var data = LoadStorage();
+        if (!data.Remove(key)) return false;
+        SaveStorage(data);
+        return true;
+    }
+
+    public void StorageClear() => SaveStorage(new Dictionary<string, JsonElement>(StringComparer.Ordinal));
+
+    public LuaTable StorageAll()
+    {
+        var table = NewTable();
+        foreach (var (key, value) in LoadStorage()) table[key] = ConvertJsonValue(value);
+        return table;
+    }
 
     public LuaTable GetPlayers()
     {
@@ -286,11 +496,28 @@ public sealed class LuaApi
         return CreatePlayerList(players);
     }
 
+    public LuaTable TargetPlayers(string pattern, LuaTable? caller = null)
+    {
+        pattern = pattern.Trim();
+        if (string.IsNullOrEmpty(pattern)) return NewTable();
+        var callerPlayer = ResolvePlayerReference(caller);
+        return CreatePlayerList(new Target(pattern).GetTarget(callerPlayer).Players.Where(IsUsablePlayer));
+    }
+
     public LuaTable GetHumanPlayers() => CreatePlayerList(Utilities.GetPlayers().Where(player => IsUsablePlayer(player) && !player.IsBot && !player.IsHLTV));
     public LuaTable GetBots() => CreatePlayerList(Utilities.GetPlayers().Where(player => IsUsablePlayer(player) && player.IsBot));
     public long GetPlayerCount() => Utilities.GetPlayers().LongCount(IsUsablePlayer);
 
     public LuaTable? RefreshPlayer(long slot) => GetPlayer(slot);
+
+    public bool IsCurrentPlayer(long slot, object? userId, string? steamId)
+    {
+        var player = ResolvePlayer(slot);
+        if (player is null) return false;
+        if (userId is not null && player.UserId != Convert.ToInt32(userId, CultureInfo.InvariantCulture)) return false;
+        return string.IsNullOrEmpty(steamId)
+               || player.SteamID.ToString(CultureInfo.InvariantCulture).Equals(steamId, StringComparison.Ordinal);
+    }
 
     public bool PlayerPrintChat(long slot, string message)
     {
@@ -456,6 +683,19 @@ public sealed class LuaApi
         if (services is null) return false;
         services.Account = (int)Math.Clamp(money, 0, int.MaxValue);
         return true;
+    }
+
+    public long PlayerEmitSound(long slot, string soundEventName, double volume, double pitch)
+    {
+        var player = ResolvePlayer(slot);
+        var pawn = player?.PlayerPawn.Value;
+        if (player is null || pawn is not { IsValid: true } || string.IsNullOrWhiteSpace(soundEventName)) return 0;
+        ValidateSoundParameters(volume, pitch);
+        return pawn.EmitSound(
+            soundEventName.Trim(),
+            new RecipientFilter(player),
+            (float)Math.Clamp(volume, 0, 1),
+            (float)Math.Clamp(pitch, 0, 255));
     }
 
     public bool CommandReply(long contextId, string message)
@@ -667,6 +907,40 @@ public sealed class LuaApi
         table["set_health"] = _playerSetHealthMethod;
         table["set_armor"] = _playerSetArmorMethod;
         table["set_money"] = _playerSetMoneyMethod;
+        table["emit_sound"] = _playerEmitSoundMethod;
+        return table;
+    }
+
+    private LuaTable CreateEntityTable(CBaseEntity entity)
+    {
+        var table = NewTable();
+        table["handle"] = (long)entity.EntityHandle.Raw;
+        table["index"] = (long)entity.Index;
+        table["designer_name"] = entity.DesignerName;
+        table["name"] = entity.Entity?.Name;
+        table["health"] = entity.Health;
+        table["team_id"] = entity.TeamNum;
+
+        if (entity.AbsOrigin is { } position)
+        {
+            using var positionTable = CreateVectorTable(position.X, position.Y, position.Z);
+            table["position"] = positionTable;
+        }
+        if (entity.AbsRotation is { } rotation)
+        {
+            using var rotationTable = CreateVectorTable(rotation.X, rotation.Y, rotation.Z);
+            table["rotation"] = rotationTable;
+        }
+
+        using var velocityTable = CreateVectorTable(entity.AbsVelocity.X, entity.AbsVelocity.Y, entity.AbsVelocity.Z);
+        table["velocity"] = velocityTable;
+        table["refresh"] = _entityRefreshMethod;
+        table["spawn"] = _entitySpawnMethod;
+        table["input"] = _entityInputMethod;
+        table["remove"] = _entityRemoveMethod;
+        table["teleport"] = _entityTeleportMethod;
+        table["set_health"] = _entitySetHealthMethod;
+        table["emit_sound"] = _entityEmitSoundMethod;
         return table;
     }
 
@@ -679,6 +953,28 @@ public sealed class LuaApi
         return IsUsablePlayer(player) ? player : null;
     }
 
+    private static CBaseEntity? ResolveEntity(long handle)
+    {
+        if (handle is < 0 or > uint.MaxValue) return null;
+        var entity = new CHandle<CBaseEntity>((uint)handle).Value;
+        return entity is { IsValid: true } ? entity : null;
+    }
+
+    private static void ValidateSoundParameters(double volume, double pitch)
+    {
+        if (!double.IsFinite(volume)) throw new ArgumentOutOfRangeException(nameof(volume), "音量必须是有限数值。");
+        if (!double.IsFinite(pitch)) throw new ArgumentOutOfRangeException(nameof(pitch), "音调必须是有限数值。");
+    }
+
+    private CCSPlayerController? ResolvePlayerReference(LuaTable? table)
+    {
+        if (table?["slot"] is null) return null;
+        var slot = Convert.ToInt64(table["slot"], CultureInfo.InvariantCulture);
+        var player = ResolvePlayer(slot);
+        if (player is null) return null;
+        return IsCurrentPlayer(slot, table["user_id"], table["steam_id"]?.ToString()) ? player : null;
+    }
+
     private LuaTable CreatePlayerList(IEnumerable<CCSPlayerController> players)
     {
         var table = NewTable();
@@ -687,6 +983,18 @@ public sealed class LuaApi
         {
             using var playerTable = CreatePlayerTable(player);
             table[index++] = playerTable;
+        }
+        return table;
+    }
+
+    private LuaTable CreateEntityList(IEnumerable<CBaseEntity> entities)
+    {
+        var table = NewTable();
+        var index = 1;
+        foreach (var entity in entities)
+        {
+            using var entityTable = CreateEntityTable(entity);
+            table[index++] = entityTable;
         }
         return table;
     }
@@ -703,6 +1011,93 @@ public sealed class LuaApi
         var index = 1;
         foreach (var value in values) table[index++] = value;
         return table;
+    }
+
+    private Dictionary<string, JsonElement> LoadStorage()
+    {
+        if (!File.Exists(StoragePath)) return new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        try
+        {
+            var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(File.ReadAllText(StoragePath))
+                       ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            foreach (var value in data.Values) _ = ConvertJsonValue(value);
+            return data;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            _logger.LogWarning(exception, "无法读取 Lua 插件 {Plugin} 的持久化数据，将使用空数据", _plugin.Name);
+            return new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        }
+    }
+
+    private void SaveStorage(Dictionary<string, JsonElement> data)
+    {
+        var directory = Path.GetDirectoryName(StoragePath)!;
+        Directory.CreateDirectory(directory);
+        var temporaryPath = StoragePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            var serializable = data.ToDictionary(pair => pair.Key, pair => ConvertJsonValue(pair.Value), StringComparer.Ordinal);
+            var json = JsonSerializer.Serialize(serializable, StorageJsonOptions);
+            File.WriteAllText(temporaryPath, json);
+            File.Move(temporaryPath, StoragePath, true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+    }
+
+    private static JsonElement SerializeStorageValue(object? value)
+    {
+        if (value is not string and not bool
+            and not byte and not sbyte and not short and not ushort
+            and not int and not uint and not long and not ulong
+            and not float and not double and not decimal)
+        {
+            throw new InvalidDataException("持久化存储只支持字符串、布尔值和数值；设置 nil 会删除键。");
+        }
+
+        if (value is float single && !float.IsFinite(single)
+            || value is double number && !double.IsFinite(number))
+        {
+            throw new InvalidDataException("持久化存储不支持 NaN 或无穷大。");
+        }
+
+        return JsonSerializer.SerializeToElement(value, value.GetType(), StorageJsonOptions);
+    }
+
+    private static object? ConvertJsonValue(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Null => null,
+        JsonValueKind.String => value.GetString(),
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        JsonValueKind.Number when value.TryGetInt64(out var integer) => integer,
+        JsonValueKind.Number when value.TryGetDouble(out var number) && double.IsFinite(number) => number,
+        JsonValueKind.Number => throw new InvalidDataException("持久化数据包含非有限或超出范围的数值。"),
+        _ => throw new InvalidDataException("持久化数据包含不支持的 JSON 类型。")
+    };
+
+    private static string ValidateStorageKey(string key)
+    {
+        key = key.Trim();
+        if (string.IsNullOrEmpty(key) || key.Length > 128 || key.Any(char.IsControl))
+        {
+            throw new ArgumentException("持久化键必须为 1 到 128 个非控制字符。", nameof(key));
+        }
+        return key;
+    }
+
+    private static string ValidateDesignerName(string designerName)
+    {
+        designerName = designerName.Trim();
+        if (string.IsNullOrEmpty(designerName) || designerName.Length > 128
+            || designerName.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '_'))
+        {
+            throw new ArgumentException("实体 Designer Name 只能包含 ASCII 字母、数字和下划线。", nameof(designerName));
+        }
+        return designerName;
     }
 
     private LuaTable CreateVectorTable(float x, float y, float z)

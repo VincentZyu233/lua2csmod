@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Lua2CS</AssemblyName>
     <RootNamespace>Lua2CS</RootNamespace>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>

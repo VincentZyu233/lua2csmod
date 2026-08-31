@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text;
 using Microsoft.Extensions.Logging;
 using NLua;
 
@@ -30,6 +31,26 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         local convar_set = __lua2cs_convar_set
         local capability_events = __lua2cs_capability_events
         local capability_listeners = __lua2cs_capability_listeners
+        local game_rules = __lua2cs_game_rules
+        local storage_get = __lua2cs_storage_get
+        local storage_has = __lua2cs_storage_has
+        local storage_set_string = __lua2cs_storage_set_string
+        local storage_set_integer = __lua2cs_storage_set_integer
+        local storage_set_number = __lua2cs_storage_set_number
+        local storage_set_boolean = __lua2cs_storage_set_boolean
+        local storage_delete = __lua2cs_storage_delete
+        local storage_clear = __lua2cs_storage_clear
+        local storage_all = __lua2cs_storage_all
+        local entities_find = __lua2cs_entities_find
+        local entities_get = __lua2cs_entities_get
+        local entities_create = __lua2cs_entities_create
+        local entity_refresh = __lua2cs_entity_refresh
+        local entity_spawn = __lua2cs_entity_spawn
+        local entity_input = __lua2cs_entity_input
+        local entity_remove = __lua2cs_entity_remove
+        local entity_teleport = __lua2cs_entity_teleport
+        local entity_set_health = __lua2cs_entity_set_health
+        local entity_emit_sound = __lua2cs_entity_emit_sound
         local players_all = __lua2cs_players_all
         local players_get = __lua2cs_players_get
         local players_get_userid = __lua2cs_players_get_userid
@@ -38,6 +59,8 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         local players_humans = __lua2cs_players_humans
         local players_bots = __lua2cs_players_bots
         local players_count = __lua2cs_players_count
+        local players_target = __lua2cs_players_target
+        local player_is_current = __lua2cs_player_is_current
         local player_chat = __lua2cs_player_chat
         local player_console = __lua2cs_player_console
         local player_center = __lua2cs_player_center
@@ -60,6 +83,7 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         local player_set_health = __lua2cs_player_set_health
         local player_set_armor = __lua2cs_player_set_armor
         local player_set_money = __lua2cs_player_set_money
+        local player_emit_sound = __lua2cs_player_emit_sound
         local command_reply = __lua2cs_command_reply
 
         cs = {
@@ -88,17 +112,36 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
                 get_userid = players_get_userid,
                 get_steamid = players_get_steamid,
                 find = players_find,
+                target = function(pattern, caller)
+                    return players_target(pattern, caller)
+                end,
                 humans = players_humans,
                 bots = players_bots,
                 count = players_count
             },
             convars = {
                 get = convar_get,
-                set = convar_set
+                set = function(name, value)
+                    return convar_set(name, tostring(value))
+                end
             },
             capabilities = {
                 events = capability_events,
                 listeners = capability_listeners
+            },
+            game = {
+                rules = game_rules
+            },
+            storage = {},
+            entities = {
+                find = function(designer_name, limit)
+                    return entities_find(designer_name, limit or 128)
+                end,
+                get = entities_get,
+                create = function(designer_name, spawn)
+                    if spawn == nil then spawn = true end
+                    return entities_create(designer_name, spawn)
+                end
             },
             team = {
                 none = 0,
@@ -154,6 +197,29 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
 
         cs.angle = cs.vec3
 
+        function cs.storage.get(key, default_value)
+            local value = storage_get(key)
+            if value == nil then return default_value end
+            return value
+        end
+
+        cs.storage.has = storage_has
+        cs.storage.delete = storage_delete
+        cs.storage.clear = storage_clear
+        cs.storage.all = storage_all
+
+        function cs.storage.set(key, value)
+            local value_type = type(value)
+            if value_type == "nil" then return storage_delete(key) end
+            if value_type == "string" then return storage_set_string(key, value) end
+            if value_type == "boolean" then return storage_set_boolean(key, value) end
+            if value_type == "number" then
+                if math.type(value) == "integer" then return storage_set_integer(key, value) end
+                return storage_set_number(key, value)
+            end
+            error("持久化存储只支持 nil、字符串、布尔值和数值", 2)
+        end
+
         function cs.plugin(spec)
             create_plugin(spec)
             local plugin = {}
@@ -205,100 +271,166 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
             return plugin
         end
 
+        local function current_player_slot(player)
+            if player == nil or not player_is_current(player.slot, player.user_id, player.steam_id) then
+                return nil
+            end
+            return player.slot
+        end
+
         function __lua2cs_player_print_chat(self, message)
-            return player_chat(self.slot, message)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_chat(slot, message) or false
         end
 
         function __lua2cs_player_print_console(self, message)
-            return player_console(self.slot, message)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_console(slot, message) or false
         end
 
         function __lua2cs_player_print_center(self, message)
-            return player_center(self.slot, message)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_center(slot, message) or false
         end
 
         function __lua2cs_player_print_alert(self, message)
-            return player_alert(self.slot, message)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_alert(slot, message) or false
         end
 
         function __lua2cs_player_print_html(self, message, duration)
-            return player_html(self.slot, message, duration or 5)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_html(slot, message, duration or 5) or false
         end
 
         function __lua2cs_player_refresh_method(self)
-            return player_refresh(self.slot)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_refresh(slot) or nil
         end
 
         function __lua2cs_player_has_permission_method(self, permission)
-            return player_permission(self.slot, permission)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_permission(slot, permission) or false
         end
 
         function __lua2cs_player_can_target_method(self, target)
-            return target ~= nil and player_can_target(self.slot, target.slot)
+            local slot = current_player_slot(self)
+            local target_slot = current_player_slot(target)
+            return slot ~= nil and target_slot ~= nil and player_can_target(slot, target_slot) or false
         end
 
         function __lua2cs_player_get_convar_method(self, name)
-            return player_convar(self.slot, name)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_convar(slot, name) or nil
         end
 
         function __lua2cs_player_execute_method(self, command)
-            return player_execute(self.slot, command, false)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_execute(slot, command, false) or false
         end
 
         function __lua2cs_player_execute_server_method(self, command)
-            return player_execute(self.slot, command, true)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_execute(slot, command, true) or false
         end
 
         function __lua2cs_player_give_item_method(self, designer_name)
-            return player_give_item(self.slot, designer_name)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_give_item(slot, designer_name) or false
         end
 
         function __lua2cs_player_remove_item_method(self, designer_name)
-            return player_remove_item(self.slot, designer_name)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_remove_item(slot, designer_name) or false
         end
 
         function __lua2cs_player_remove_weapons_method(self)
-            return player_remove_weapons(self.slot)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_remove_weapons(slot) or false
         end
 
         function __lua2cs_player_drop_weapon_method(self)
-            return player_drop_weapon(self.slot)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_drop_weapon(slot) or false
         end
 
         function __lua2cs_player_respawn_method(self)
-            return player_respawn(self.slot)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_respawn(slot) or false
         end
 
         function __lua2cs_player_kill_method(self, explode, force)
-            return player_kill(self.slot, explode or false, force or false)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_kill(slot, explode or false, force or false) or false
         end
 
         function __lua2cs_player_kick_method(self)
-            return player_kick(self.slot)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_kick(slot) or false
         end
 
         function __lua2cs_player_change_team_method(self, team)
-            return player_change_team(self.slot, team, false)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_change_team(slot, team, false) or false
         end
 
         function __lua2cs_player_switch_team_method(self, team)
-            return player_change_team(self.slot, team, true)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_change_team(slot, team, true) or false
         end
 
         function __lua2cs_player_teleport_method(self, position, angles, velocity)
-            return player_teleport(self.slot, position, angles, velocity)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_teleport(slot, position, angles, velocity) or false
         end
 
         function __lua2cs_player_set_health_method(self, health)
-            return player_set_health(self.slot, health)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_set_health(slot, health) or false
         end
 
         function __lua2cs_player_set_armor_method(self, armor)
-            return player_set_armor(self.slot, armor)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_set_armor(slot, armor) or false
         end
 
         function __lua2cs_player_set_money_method(self, money)
-            return player_set_money(self.slot, money)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_set_money(slot, money) or false
+        end
+
+        function __lua2cs_player_emit_sound_method(self, sound_event_name, volume, pitch)
+            local slot = current_player_slot(self)
+            if slot == nil then return 0 end
+            return player_emit_sound(slot, sound_event_name, volume or 1, pitch or 0)
+        end
+
+        function __lua2cs_entity_refresh_method(self)
+            return entity_refresh(self.handle)
+        end
+
+        function __lua2cs_entity_spawn_method(self)
+            return entity_spawn(self.handle)
+        end
+
+        function __lua2cs_entity_input_method(self, input_name, value, delay)
+            return entity_input(self.handle, input_name, value or "", delay or 0)
+        end
+
+        function __lua2cs_entity_remove_method(self, delay)
+            return entity_remove(self.handle, delay or 0)
+        end
+
+        function __lua2cs_entity_teleport_method(self, position, angles, velocity)
+            return entity_teleport(self.handle, position, angles, velocity)
+        end
+
+        function __lua2cs_entity_set_health_method(self, health)
+            return entity_set_health(self.handle, health)
+        end
+
+        function __lua2cs_entity_emit_sound_method(self, sound_event_name, volume, pitch)
+            return entity_emit_sound(self.handle, sound_event_name, volume or 1, pitch or 0)
         end
 
         function __lua2cs_command_reply_method(self, message)
@@ -331,6 +463,26 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         __lua2cs_convar_set = nil
         __lua2cs_capability_events = nil
         __lua2cs_capability_listeners = nil
+        __lua2cs_game_rules = nil
+        __lua2cs_storage_get = nil
+        __lua2cs_storage_has = nil
+        __lua2cs_storage_set_string = nil
+        __lua2cs_storage_set_integer = nil
+        __lua2cs_storage_set_number = nil
+        __lua2cs_storage_set_boolean = nil
+        __lua2cs_storage_delete = nil
+        __lua2cs_storage_clear = nil
+        __lua2cs_storage_all = nil
+        __lua2cs_entities_find = nil
+        __lua2cs_entities_get = nil
+        __lua2cs_entities_create = nil
+        __lua2cs_entity_refresh = nil
+        __lua2cs_entity_spawn = nil
+        __lua2cs_entity_input = nil
+        __lua2cs_entity_remove = nil
+        __lua2cs_entity_teleport = nil
+        __lua2cs_entity_set_health = nil
+        __lua2cs_entity_emit_sound = nil
         __lua2cs_players_all = nil
         __lua2cs_players_get = nil
         __lua2cs_players_get_userid = nil
@@ -339,6 +491,8 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         __lua2cs_players_humans = nil
         __lua2cs_players_bots = nil
         __lua2cs_players_count = nil
+        __lua2cs_players_target = nil
+        __lua2cs_player_is_current = nil
         __lua2cs_player_chat = nil
         __lua2cs_player_console = nil
         __lua2cs_player_center = nil
@@ -361,6 +515,7 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         __lua2cs_player_set_health = nil
         __lua2cs_player_set_armor = nil
         __lua2cs_player_set_money = nil
+        __lua2cs_player_emit_sound = nil
         __lua2cs_command_reply = nil
         """;
 
@@ -368,6 +523,7 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
     {
         var fullPath = Path.GetFullPath(scriptPath);
         var state = new Lua { UseTraceback = true };
+        state.State.Encoding = Encoding.UTF8;
         LuaPlugin? plugin = null;
 
         try
@@ -433,6 +589,26 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         Register(state, api, "__lua2cs_convar_set", nameof(LuaApi.SetConVar));
         Register(state, api, "__lua2cs_capability_events", nameof(LuaApi.GetEventNames));
         Register(state, api, "__lua2cs_capability_listeners", nameof(LuaApi.GetListenerNames));
+        Register(state, api, "__lua2cs_game_rules", nameof(LuaApi.GetGameRules));
+        Register(state, api, "__lua2cs_storage_get", nameof(LuaApi.StorageGet));
+        Register(state, api, "__lua2cs_storage_has", nameof(LuaApi.StorageHas));
+        Register(state, api, "__lua2cs_storage_set_string", nameof(LuaApi.StorageSetString));
+        Register(state, api, "__lua2cs_storage_set_integer", nameof(LuaApi.StorageSetInteger));
+        Register(state, api, "__lua2cs_storage_set_number", nameof(LuaApi.StorageSetNumber));
+        Register(state, api, "__lua2cs_storage_set_boolean", nameof(LuaApi.StorageSetBoolean));
+        Register(state, api, "__lua2cs_storage_delete", nameof(LuaApi.StorageDelete));
+        Register(state, api, "__lua2cs_storage_clear", nameof(LuaApi.StorageClear));
+        Register(state, api, "__lua2cs_storage_all", nameof(LuaApi.StorageAll));
+        Register(state, api, "__lua2cs_entities_find", nameof(LuaApi.FindEntities));
+        Register(state, api, "__lua2cs_entities_get", nameof(LuaApi.GetEntity));
+        Register(state, api, "__lua2cs_entities_create", nameof(LuaApi.CreateEntity));
+        Register(state, api, "__lua2cs_entity_refresh", nameof(LuaApi.RefreshEntity));
+        Register(state, api, "__lua2cs_entity_spawn", nameof(LuaApi.EntitySpawn));
+        Register(state, api, "__lua2cs_entity_input", nameof(LuaApi.EntityInput));
+        Register(state, api, "__lua2cs_entity_remove", nameof(LuaApi.EntityRemove));
+        Register(state, api, "__lua2cs_entity_teleport", nameof(LuaApi.EntityTeleport));
+        Register(state, api, "__lua2cs_entity_set_health", nameof(LuaApi.EntitySetHealth));
+        Register(state, api, "__lua2cs_entity_emit_sound", nameof(LuaApi.EntityEmitSound));
         Register(state, api, "__lua2cs_players_all", nameof(LuaApi.GetPlayers));
         Register(state, api, "__lua2cs_players_get", nameof(LuaApi.GetPlayer));
         Register(state, api, "__lua2cs_players_get_userid", nameof(LuaApi.GetPlayerByUserId));
@@ -441,6 +617,8 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         Register(state, api, "__lua2cs_players_humans", nameof(LuaApi.GetHumanPlayers));
         Register(state, api, "__lua2cs_players_bots", nameof(LuaApi.GetBots));
         Register(state, api, "__lua2cs_players_count", nameof(LuaApi.GetPlayerCount));
+        Register(state, api, "__lua2cs_players_target", nameof(LuaApi.TargetPlayers));
+        Register(state, api, "__lua2cs_player_is_current", nameof(LuaApi.IsCurrentPlayer));
         Register(state, api, "__lua2cs_player_chat", nameof(LuaApi.PlayerPrintChat));
         Register(state, api, "__lua2cs_player_console", nameof(LuaApi.PlayerPrintConsole));
         Register(state, api, "__lua2cs_player_center", nameof(LuaApi.PlayerPrintCenter));
@@ -463,6 +641,7 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         Register(state, api, "__lua2cs_player_set_health", nameof(LuaApi.PlayerSetHealth));
         Register(state, api, "__lua2cs_player_set_armor", nameof(LuaApi.PlayerSetArmor));
         Register(state, api, "__lua2cs_player_set_money", nameof(LuaApi.PlayerSetMoney));
+        Register(state, api, "__lua2cs_player_emit_sound", nameof(LuaApi.PlayerEmitSound));
         Register(state, api, "__lua2cs_command_reply", nameof(LuaApi.CommandReply));
     }
 

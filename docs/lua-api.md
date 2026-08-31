@@ -168,6 +168,52 @@ ConVar 修改是服务器全局状态，不会随 Lua 插件卸载自动恢复�
 cs.server.print_chat_all(cs.colors.green .. "绿色消息" .. cs.colors.default)
 ```
 
+## 游戏规则
+
+```lua
+local rules = cs.game.rules()
+if rules ~= nil then
+    cs.log.info(string.format("T %d : %d CT", rules.terrorist_score or 0, rules.ct_score or 0))
+end
+```
+
+`cs.game.rules()` 在游戏规则实体可用时返回快照，否则返回 `nil`。字段包括：
+
+- `freeze_period`、`warmup_period`：是否处于冻结或热身阶段。
+- `warmup_start_time`、`warmup_end_time`、`round_start_time`：对应阶段的服务器时间。
+- `game_restart`、`game_phase`、`total_rounds_played`、`overtime_playing`：比赛进程状态。
+- `bomb_planted`、`bomb_dropped`：C4 状态。
+- `ct_timeout_active`、`terrorist_timeout_active`：双方暂停状态。
+- `terrorist_score`、`ct_score`：双方当前比分；队伍管理实体尚未就绪时字段可能为 `nil`。
+
+返回值是调用时的只读快照。需要最新状态时应重新调用，而不是长期保存旧表。
+
+## 持久化存储
+
+```lua
+local visits = cs.storage.get("visits", 0) + 1
+cs.storage.set("visits", visits)
+cs.storage.set("enabled", true)
+cs.storage.set("message", "中文内容")
+
+local exists = cs.storage.has("visits")
+local snapshot = cs.storage.all()
+cs.storage.delete("message")
+cs.storage.set("enabled", nil) -- 等同于删除
+cs.storage.clear()
+```
+
+每个顶层插件使用独立文件 `scripts/.lua2cs-data/<脚本名>.json`。接口不接受文件路径，也不会允许脚本越过该目录访问文件系统。Lua 与 JSON 均使用 UTF-8。
+
+- `cs.storage.get(key, default)`：键不存在时返回 `default`；省略默认值时返回 `nil`。
+- `cs.storage.has(key)`：判断键是否存在。
+- `cs.storage.set(key, value)`：保存字符串、布尔值、整数或有限小数；成功返回 `true`。
+- `cs.storage.set(key, nil)`、`cs.storage.delete(key)`：删除键；只有键原本存在时返回 `true`。
+- `cs.storage.all()`：返回当前全部键值的快照。
+- `cs.storage.clear()`：清空当前插件的数据。
+
+键去除首尾空白后必须为 1 到 128 个非控制字符。不支持表、函数、userdata、`NaN` 和正负无穷。每次操作都会重新读取文件并以临时文件原子替换，避免热重载中新旧 VM 的缓存互相覆盖。JSON 损坏时会记录警告并按空数据处理。
+
 ## 玩家接口
 
 ```lua
@@ -179,6 +225,7 @@ local by_slot = cs.players.get(0)
 local by_userid = cs.players.get_userid(12)
 local by_steamid = cs.players.get_steamid("76561198000000000")
 local matches = cs.players.find("名字片段")
+local targets = cs.players.target("@alive", caller)
 ```
 
 玩家集合接口：
@@ -191,8 +238,11 @@ local matches = cs.players.find("名字片段")
 - `cs.players.get_userid(userid)`：按当前连接的 userid 查找。
 - `cs.players.get_steamid(steam_id)`：按 SteamID64 字符串查找。
 - `cs.players.find(query)`：按槽位、userid、SteamID64 或不区分大小写的名字片段查询，始终返回数组。
+- `cs.players.target(pattern, caller)`：使用 CounterStrikeSharp 原生目标选择器，始终返回数组；`caller` 可为玩家表或 `nil`。
 
 `find` 可能匹配多名玩家，执行管理操作前必须检查 `#matches == 1`。
+
+原生目标选择器支持 `@all`、`@bots`、`@human`、`@alive`、`@dead`、`@me`、`@!me`、`@ct`、`@t`、`@spec`、`@aim`、`#userid`、SteamID 和名字。`@me`、`@!me`、`@aim` 依赖有效调用者；服务器控制台调用命令时 `caller` 为 `nil`。目标选择只负责匹配，管理操作仍应使用 `caller:can_target(target)` 检查 CSS 免疫等级。
 
 玩家快照字段：
 
@@ -236,12 +286,48 @@ local matches = cs.players.find("名字片段")
 - `player:switch_team(team)`：强制换队并保留存活状态和装备。
 - `player:teleport(position, angles, velocity)`：三个参数均可为 `nil`，但至少提供一个向量。
 - `player:set_health(value)`、`player:set_armor(value)`、`player:set_money(value)`
+- `player:emit_sound(sound_event_name, volume, pitch)`：只向该玩家播放声音事件；音量默认为 1，音调默认为 0，返回声音实体 GUID，失败返回 0。
 
 修改方法在成功找到有效玩家或 Pawn 时返回 `true`，否则返回 `false`。无返回结果的 CSS 底层操作只能表示已成功提交，不能保证游戏规则不会随后覆盖该状态。
 
-玩家表是短期视图。玩家断开连接或换图后，应通过 `cs.players.get(slot)` 重新获取，不要长期保存旧玩家表。
+玩家表是短期视图。所有玩家方法都会同时校验槽位、userid 和 SteamID64，旧表不会因槽位被新玩家复用而误操作新人。玩家断开连接或换图后，应通过查询接口重新获取，不要长期保存旧玩家表。
 
 `ip_address` 属于敏感信息，不应写入公开日志或发送给无管理权限的玩家。
+
+## 实体接口
+
+```lua
+local doors = cs.entities.find("func_door", 32)
+local entity = doors[1] and cs.entities.get(doors[1].index) or nil
+local prop = cs.entities.create("prop_dynamic", false)
+if prop ~= nil then prop:spawn() end
+
+if entity ~= nil then
+    entity:input("Open")
+    entity:teleport(cs.vec3(0, 0, 128), nil, nil)
+    entity:emit_sound("Example.Sound", 1, 0)
+end
+```
+
+- `cs.entities.find(designer_name, limit)`：按精确 Designer Name 查询，`limit` 默认为 128，限制为 1 到 512，返回数组。
+- `cs.entities.get(index)`：按当前实体索引获取快照；索引无效时返回 `nil`。
+- `cs.entities.create(designer_name, spawn)`：创建实体，`spawn` 默认为 `true`；失败返回 `nil`。Designer Name 只允许 ASCII 字母、数字和下划线。
+
+实体快照字段包括 `handle`、`index`、`designer_name`、`name`、`health`、`team_id`、`position`、`rotation` 和 `velocity`。部分实体没有名字或坐标，对应字段可能为 `nil`。
+
+实体方法：
+
+- `entity:refresh()`：通过完整句柄重新读取快照；实体已失效时返回 `nil`。
+- `entity:spawn()`：对尚未生成的实体执行 DispatchSpawn。
+- `entity:input(input_name, value, delay)`：立即或延迟发送 Source 2 I/O 输入，`value` 默认为空字符串。
+- `entity:remove(delay)`：立即或延迟删除实体。
+- `entity:teleport(position, angles, velocity)`：三个向量均可为 `nil`，但至少提供一个。
+- `entity:set_health(value)`：设置生命值并通知网络状态变化。
+- `entity:emit_sound(sound_event_name, volume, pitch)`：从实体播放声音，返回声音实体 GUID，失败返回 0。
+
+实体表保存的是包含索引和序列号的完整 32 位 CHandle，而不是裸索引；实体被删除并复用索引后，旧表的方法会返回失败，不会操作新实体。延迟参数限制为 0 到 3600 秒；声音音量会限制在 0 到 1，音调会限制在 0 到 255，且不接受 `NaN` 或无穷。
+
+实体创建、重复生成、删除和任意 I/O 输入可能破坏地图逻辑、导致崩服或制造无法清理的实体，只应允许受信任脚本使用。`create(..., false)` 创建的实体不会自动 DispatchSpawn，调用者完成生成前配置后需要调用 `entity:spawn()`；不得对已经生成的实体重复调用。
 
 ## 向量、队伍与按键
 
@@ -300,6 +386,8 @@ scripts/
 
 文件监听回调不会直接访问游戏 API，真正的重载会通过 `Server.NextWorldUpdate` 回到游戏线程执行，即使服务器处于休眠状态也可以处理。
 
+验证过程会执行新脚本的顶层代码，因此它不是事务沙箱。不要在脚本顶层创建实体、执行服务器命令、修改 ConVar 或写入持久化数据；把有副作用的初始化放入 `on_load`。即使如此，`on_load` 已经完成的外部状态修改也无法在后续语句失败时自动回滚，复杂初始化应自行使用 `on_unload` 或错误处理清理资源。
+
 ## 示例模板索引
 
 | 文件 | 用途 | 主要接口 |
@@ -317,5 +405,9 @@ scripts/
 | `checkpoints.lua` | 保存并返回传送点 | 向量、坐标、传送 |
 | `player_info.lua` | 查询玩家和武器信息 | 玩家查找、完整快照 |
 | `module_demo.lua` | 引用子目录公共模块 | `require`、模块拆分 |
+| `persistent_kills.lua` | 跨热重载保存累计击杀 | 安全持久化、击杀事件 |
+| `target_tools.lua` | 按 CSS 目标语法批量设置护甲 | 原生目标选择、免疫检查 |
+| `game_status.lua` | 查询回合阶段与比分 | 游戏规则快照 |
+| `entity_tools.lua` | 查询实体并发送 I/O 输入 | 实体快照、完整句柄、实体输入 |
 
 安装包中的模板位于 `addons/counterstrikesharp/plugins/Lua2CS/examples`。复制需要启用的顶层模板到同级 `scripts` 目录；`module_demo.lua` 还需要同时复制 `modules` 子目录。

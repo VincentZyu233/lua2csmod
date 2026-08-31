@@ -139,6 +139,31 @@ public sealed class LuaRuntimeTests : IDisposable
     }
 
     [Fact]
+    public void LuaStringsUseUtf8AcrossPluginMetadataAndCommands()
+    {
+        var path = WriteScript("utf8.lua", """
+            local plugin = cs.plugin({
+                name = "中文插件名",
+                description = "中文插件说明"
+            })
+            plugin:command("css_utf8", {
+                description = "中文命令说明",
+                usage = "<中文参数>"
+            }, function() end)
+            lua_text = "Lua 传给 C# 的中文"
+            """);
+
+        using var plugin = new LuaRuntime(NullLogger.Instance, false).Prepare(path);
+
+        Assert.Equal("中文插件名", plugin.Name);
+        Assert.Equal("中文插件说明", plugin.Description);
+        Assert.Equal("Lua 传给 C# 的中文", plugin.State.GetString("lua_text"));
+        var command = Assert.IsType<CommandRegistration>(Assert.Single(plugin.Registrations));
+        Assert.Equal("中文命令说明", command.Description);
+        Assert.Equal("<中文参数>", command.Usage);
+    }
+
+    [Fact]
     public void ExtendedBootstrapExposesHelpersAndHidesBridgeFunctions()
     {
         var path = WriteScript("extended_api.lua", """
@@ -151,6 +176,10 @@ public sealed class LuaRuntimeTests : IDisposable
             assert(cs.convars.get ~= nil)
             assert(cs.capabilities.events ~= nil)
             assert(cs.capabilities.listeners ~= nil)
+            assert(cs.game.rules ~= nil)
+            assert(cs.storage.get ~= nil and cs.storage.set ~= nil)
+            assert(cs.players.target ~= nil)
+            assert(cs.entities.find ~= nil and cs.entities.get ~= nil and cs.entities.create ~= nil)
             assert(cs.team.t == 2 and cs.team.ct == 3)
             assert(cs.buttons.jump == 2)
 
@@ -175,6 +204,10 @@ public sealed class LuaRuntimeTests : IDisposable
             assert(__lua2cs_server_info == nil)
             assert(__lua2cs_player_give_item == nil)
             assert(__lua2cs_player_print_html == nil)
+            assert(__lua2cs_player_emit_sound == nil)
+            assert(__lua2cs_entities_find == nil)
+            assert(__lua2cs_entity_spawn == nil)
+            assert(__lua2cs_entity_remove == nil)
             """);
 
         using var plugin = new LuaRuntime(NullLogger.Instance, false).Prepare(path);
@@ -183,6 +216,84 @@ public sealed class LuaRuntimeTests : IDisposable
             plugin.Registrations,
             item => Assert.False(Assert.IsType<TimerRegistration>(item).Repeat),
             item => Assert.True(Assert.IsType<TimerRegistration>(item).Repeat));
+    }
+
+    [Fact]
+    public void StoragePersistsPrimitiveValuesAcrossLuaVirtualMachines()
+    {
+        var path = WriteScript("storage.lua", """
+            local plugin = cs.plugin({ name = "Storage" })
+            counter = cs.storage.get("counter", 0) + 1
+            cs.storage.set("counter", counter)
+            cs.storage.set("enabled", true)
+            cs.storage.set("message", "中文数据")
+            cs.storage.set("ratio", 1.25)
+            cs.storage.set("temporary", "待删除")
+            assert(cs.storage.set("temporary", nil))
+            assert(not cs.storage.has("temporary"))
+            assert(cs.storage.has("counter"))
+            local all = cs.storage.all()
+            assert(all.counter == counter)
+            assert(all.enabled == true)
+            assert(all.message == "中文数据")
+            assert(all.ratio == 1.25)
+            """);
+
+        using (var first = new LuaRuntime(NullLogger.Instance, false).Prepare(path))
+        {
+            Assert.Equal(1, first.State.GetInteger("counter"));
+        }
+
+        using (var second = new LuaRuntime(NullLogger.Instance, false).Prepare(path))
+        {
+            Assert.Equal(2, second.State.GetInteger("counter"));
+        }
+
+        var dataPath = Path.Combine(_directory, ".lua2cs-data", "storage.json");
+        using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(dataPath));
+        Assert.Equal(2, document.RootElement.GetProperty("counter").GetInt64());
+        Assert.True(document.RootElement.GetProperty("enabled").GetBoolean());
+        Assert.Equal("中文数据", document.RootElement.GetProperty("message").GetString());
+        Assert.Equal(1.25, document.RootElement.GetProperty("ratio").GetDouble());
+        Assert.False(document.RootElement.TryGetProperty("temporary", out _));
+    }
+
+    [Fact]
+    public void StorageRejectsNonFiniteNumbersAndCanBeCleared()
+    {
+        var invalidPath = WriteScript("invalid_number.lua", """
+            cs.plugin({ name = "Invalid Number" })
+            cs.storage.set("bad", 0 / 0)
+            """);
+        Assert.ThrowsAny<Exception>(() => new LuaRuntime(NullLogger.Instance, false).Prepare(invalidPath));
+
+        var clearPath = WriteScript("clear.lua", """
+            cs.plugin({ name = "Clear" })
+            cs.storage.set("one", 1)
+            cs.storage.clear()
+            assert(next(cs.storage.all()) == nil)
+            assert(cs.storage.get("one") == nil)
+            assert(cs.storage.delete("missing") == false)
+            """);
+        using var plugin = new LuaRuntime(NullLogger.Instance, false).Prepare(clearPath);
+    }
+
+    [Fact]
+    public void StorageRecoversFromDamagedJson()
+    {
+        var dataDirectory = Path.Combine(_directory, ".lua2cs-data");
+        Directory.CreateDirectory(dataDirectory);
+        var dataPath = Path.Combine(dataDirectory, "recover.json");
+        File.WriteAllText(dataPath, "{ damaged json");
+        var path = WriteScript("recover.lua", """
+            cs.plugin({ name = "Recover" })
+            assert(cs.storage.get("missing", "fallback") == "fallback")
+            cs.storage.set("recovered", true)
+            """);
+
+        using var plugin = new LuaRuntime(NullLogger.Instance, false).Prepare(path);
+        using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(dataPath));
+        Assert.True(document.RootElement.GetProperty("recovered").GetBoolean());
     }
 
     [Theory]
@@ -256,6 +367,10 @@ public sealed class LuaRuntimeTests : IDisposable
     [InlineData("checkpoints.lua")]
     [InlineData("player_info.lua")]
     [InlineData("module_demo.lua")]
+    [InlineData("persistent_kills.lua")]
+    [InlineData("target_tools.lua")]
+    [InlineData("game_status.lua")]
+    [InlineData("entity_tools.lua")]
     public void ShippedExamplesLoad(string fileName)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "examples", fileName);
@@ -276,6 +391,32 @@ public sealed class LuaRuntimeTests : IDisposable
     [InlineData("  fun_plugin.lua  ", "fun_plugin")]
     public void PluginKeysAreNormalized(string source, string expected) =>
         Assert.Equal(expected, LuaPluginManager.NormalizeKey(source));
+
+    [Theory]
+    [InlineData("gameplay.lua", true)]
+    [InlineData("GAMEPLAY.LUA", true)]
+    [InlineData("_shared.lua", false)]
+    [InlineData("readme.txt", false)]
+    public void StandaloneScriptNamesExcludeModuleFiles(string path, bool expected) =>
+        Assert.Equal(expected, LuaPluginManager.IsStandaloneScript(path));
+
+    [Fact]
+    public void ScriptPathResolutionSupportsUppercaseLuaExtensionsOnLinux()
+    {
+        var path = WriteScript("UPPER.LUA", "cs.plugin({ name = 'Upper' })");
+
+        Assert.Equal(path, LuaPluginManager.ResolveScriptPath(_directory, "upper"));
+    }
+
+    [Fact]
+    public void RootUnderscoreAndNestedFilesTriggerFullReload()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "lua2cs-scripts");
+
+        Assert.False(LuaPluginManager.IsModulePath(Path.Combine(root, "gameplay.lua"), root));
+        Assert.True(LuaPluginManager.IsModulePath(Path.Combine(root, "_shared.lua"), root));
+        Assert.True(LuaPluginManager.IsModulePath(Path.Combine(root, "modules", "shared.lua"), root));
+    }
 
     private string WriteScript(string name, string content)
     {
