@@ -27,7 +27,7 @@ mkdir -p "$plugin_dir/scripts" "$plugin_dir/examples"
 cp "$publish_dir/Lua2CS.dll" "$publish_dir/Lua2CS.deps.json" "$plugin_dir/"
 cp "$publish_dir/NLua.dll" "$publish_dir/KeraLua.dll" "$plugin_dir/"
 cp "$publish_dir/liblua54.so" "$plugin_dir/"
-cp "$project_root"/examples/*.lua "$plugin_dir/examples/"
+cp -R "$project_root"/examples/. "$plugin_dir/examples/"
 
 mkdir -p "$artifact_root"
 (

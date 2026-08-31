@@ -24,10 +24,13 @@ public sealed class TimerBindings(BasePlugin host)
         timer = host.AddTimer(registration.Interval, () =>
         {
             if (!plugin.IsActive) return;
-            plugin.Invoke(registration.Callback);
-            if (!registration.Repeat && timer is not null)
+            try
             {
-                host.Timers.Remove(timer);
+                plugin.Invoke(registration.Callback);
+            }
+            finally
+            {
+                if (!registration.Repeat) plugin.RemoveRegistration(registration.Id);
             }
         }, flags);
 

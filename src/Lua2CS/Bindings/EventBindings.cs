@@ -35,7 +35,11 @@ public sealed class EventBindings
             DeregisterMethod.MakeGenericMethod(eventType).Invoke(_host, [handler, registration.Mode]));
     }
 
-    public static IReadOnlyCollection<string> Names => EventTypes.Keys.ToArray();
+    public static IReadOnlyCollection<string> Names => EventTypes.Values
+        .Select(type => type.GetCustomAttribute<EventNameAttribute>()?.Name)
+        .OfType<string>()
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
 
     private Delegate CreateHandler(Type eventType, LuaPlugin plugin, LuaFunction callback, HookMode mode)
     {

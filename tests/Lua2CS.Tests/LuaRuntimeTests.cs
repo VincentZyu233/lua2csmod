@@ -139,6 +139,69 @@ public sealed class LuaRuntimeTests : IDisposable
     }
 
     [Fact]
+    public void ExtendedBootstrapExposesHelpersAndHidesBridgeFunctions()
+    {
+        var path = WriteScript("extended_api.lua", """
+            local plugin = cs.plugin({ name = "Extended API" })
+            assert(cs.server.info ~= nil)
+            assert(cs.server.maps ~= nil)
+            assert(cs.players.get_userid ~= nil)
+            assert(cs.players.get_steamid ~= nil)
+            assert(cs.players.find ~= nil)
+            assert(cs.convars.get ~= nil)
+            assert(cs.capabilities.events ~= nil)
+            assert(cs.capabilities.listeners ~= nil)
+            assert(cs.team.t == 2 and cs.team.ct == 3)
+            assert(cs.buttons.jump == 2)
+
+            local vector = cs.vec3(1, 2, 3)
+            assert(vector.x == 1 and vector[2] == 2 and vector.z == 3)
+
+            local found_event = false
+            for _, name in ipairs(cs.capabilities.events()) do
+                if name == "player_death" then found_event = true end
+            end
+            assert(found_event)
+
+            local found_listener = false
+            for _, name in ipairs(cs.capabilities.listeners()) do
+                if name == "OnMapStart" then found_listener = true end
+            end
+            assert(found_listener)
+
+            plugin:after(1, function() end)
+            plugin:every(2, function() end)
+
+            assert(__lua2cs_server_info == nil)
+            assert(__lua2cs_player_give_item == nil)
+            assert(__lua2cs_player_print_html == nil)
+            """);
+
+        using var plugin = new LuaRuntime(NullLogger.Instance, false).Prepare(path);
+
+        Assert.Collection(
+            plugin.Registrations,
+            item => Assert.False(Assert.IsType<TimerRegistration>(item).Repeat),
+            item => Assert.True(Assert.IsType<TimerRegistration>(item).Repeat));
+    }
+
+    [Theory]
+    [InlineData("none", CounterStrikeSharp.API.Modules.Utils.CsTeam.None)]
+    [InlineData("spec", CounterStrikeSharp.API.Modules.Utils.CsTeam.Spectator)]
+    [InlineData("t", CounterStrikeSharp.API.Modules.Utils.CsTeam.Terrorist)]
+    [InlineData("counter_terrorist", CounterStrikeSharp.API.Modules.Utils.CsTeam.CounterTerrorist)]
+    [InlineData(3L, CounterStrikeSharp.API.Modules.Utils.CsTeam.CounterTerrorist)]
+    public void TeamNamesAreParsed(object source, CounterStrikeSharp.API.Modules.Utils.CsTeam expected) =>
+        Assert.Equal(expected, LuaApi.ParseTeam(source));
+
+    [Theory]
+    [InlineData(-1L)]
+    [InlineData(4L)]
+    [InlineData("unknown")]
+    public void InvalidTeamNamesAreRejected(object source) =>
+        Assert.Throws<ArgumentException>(() => LuaApi.ParseTeam(source));
+
+    [Fact]
     public void FailedDynamicRegistrationIsRemovedAgain()
     {
         var path = WriteScript("dynamic_failure.lua", """
@@ -183,6 +246,16 @@ public sealed class LuaRuntimeTests : IDisposable
     [InlineData("hello.lua")]
     [InlineData("qwq.lua")]
     [InlineData("round_timer.lua")]
+    [InlineData("admin_tools.lua")]
+    [InlineData("spawn_protection.lua")]
+    [InlineData("round_loadout.lua")]
+    [InlineData("kill_reward.lua")]
+    [InlineData("player_hud.lua")]
+    [InlineData("join_messages.lua")]
+    [InlineData("map_tools.lua")]
+    [InlineData("checkpoints.lua")]
+    [InlineData("player_info.lua")]
+    [InlineData("module_demo.lua")]
     public void ShippedExamplesLoad(string fileName)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "examples", fileName);

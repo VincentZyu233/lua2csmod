@@ -25,7 +25,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\..\examples\*.lua" Link="examples\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\examples\**\*.lua" Link="examples\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

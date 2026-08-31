@@ -43,7 +43,11 @@ public sealed class ListenerBindings
             RemoveMethod.MakeGenericMethod(listenerType).Invoke(_host, [handler]));
     }
 
-    public static IReadOnlyCollection<string> Names => ListenerTypes.Keys.ToArray();
+    public static IReadOnlyCollection<string> Names => ListenerTypes.Values
+        .Select(type => type.GetCustomAttribute<ListenerNameAttribute>()?.Name)
+        .OfType<string>()
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
 
     private Delegate CreateHandler(Type delegateType, LuaPlugin plugin, LuaFunction callback)
     {

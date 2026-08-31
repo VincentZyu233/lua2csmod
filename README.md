@@ -10,7 +10,7 @@ Lua2CS 是面向 CounterStrikeSharp 的 Lua 5.4 插件宿主。C# 宿主只需�
 
 ## 安装
 
-1. 从预发布版本下载 `Lua2CS-preview-linux-x64.zip`。
+1. 从 [预发布版本](https://github.com/ra1nyxin/lua2csmod/releases/tag/preview) 下载 `Lua2CS-preview-linux-x64.zip`。
 2. 将压缩包解压到服务器的 `game/csgo` 目录。
 3. 把 Lua 脚本放入 `addons/counterstrikesharp/plugins/Lua2CS/scripts`。
 4. 重启服务器，或执行 `css_plugins load Lua2CS`。
@@ -75,6 +75,25 @@ CounterStrikeSharp 会生成 `addons/counterstrikesharp/configs/plugins/Lua2CS/L
 - `AllowUnsafeLibraries`：恢复 Lua 文件和操作系统库。即使开启，也不会暴露 `luanet`。
 
 默认情况下，Lua 脚本不能访问 `luanet`、原生模块、进程执行或直接文件 I/O。`require` 仍可加载当前脚本目录中的 Lua 模块。
+
+## 接口范围
+
+Lua 脚本可以使用以下能力：
+
+- 游戏事件、Listener、命令、一次性和循环定时器。
+- 玩家列表以及按槽位、userid、SteamID64 和名字查询玩家。
+- 玩家生命、护甲、金钱、坐标、视角、武器、按键、队伍和回合状态快照。
+- 玩家聊天、控制台、中央提示、HTML HUD、权限、客户端命令、传送、复活、队伍和武器操作。
+- 服务器地图、时间、Tick、地图列表、模型预缓存和控制台命令。
+- ConVar 读取与修改、官方事件名和 Listener 名枚举。
+
+修改生命、武器、队伍、传送和 ConVar 等操作会直接影响服务器状态，应只向可信脚本开放。
+
+## 示例模板
+
+`examples` 中包含可直接复制到 `scripts` 的中文模板：基础命令、聊天响应、回合计时器、管理员工具、出生保护、回合装备、击杀奖励、玩家 HUD、进出服播报、地图管理、传送点、玩家信息和模块化脚本。
+
+模板默认不会自动运行；安装包将它们放在插件的 `examples` 目录中。选中模板后复制到同级 `scripts` 目录即可加载，后续保存文件会自动热重载。
 
 完整接口参见 [Lua 脚本接口](docs/lua-api.md)，可运行示例位于 [examples](examples)。
 
