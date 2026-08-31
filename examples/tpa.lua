@@ -15,7 +15,7 @@
 
 local plugin = cs.plugin({
     name = "玩家传送请求",
-    version = "1.3.0",
+    version = "0.3.4",
     description = "提供不限制阵营和回合状态的宽松玩家传送请求"
 })
 
