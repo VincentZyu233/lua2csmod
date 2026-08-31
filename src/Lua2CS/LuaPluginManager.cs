@@ -55,7 +55,7 @@ public sealed class LuaPluginManager : IDisposable
         if (_plugins.ContainsKey(key)) return Reload(key);
 
         var path = ResolveScriptPath(key);
-        if (!File.Exists(path)) return PluginOperationResult.Fail(key, "Script file does not exist.");
+        if (!File.Exists(path)) return PluginOperationResult.Fail(key, "脚本文件不存在。");
 
         LuaPlugin? candidate = null;
         try
@@ -68,7 +68,7 @@ public sealed class LuaPluginManager : IDisposable
             candidate.InvokeLifecycle(candidate.LoadCallback, false);
             _plugins.Add(key, candidate);
             _logger.LogInformation("Loaded Lua plugin {Name} v{Version} from {File}", candidate.Name, candidate.Version, Path.GetFileName(path));
-            return PluginOperationResult.Ok(key, $"Loaded {candidate.Name} v{candidate.Version}.");
+            return PluginOperationResult.Ok(key, $"已加载 {candidate.Name} v{candidate.Version}。");
         }
         catch (Exception exception)
         {
@@ -99,7 +99,7 @@ public sealed class LuaPluginManager : IDisposable
             candidate?.Dispose();
             exception = Unwrap(exception);
             _logger.LogError(exception, "Lua reload validation failed for {Script}; keeping the old version", key);
-            return PluginOperationResult.Fail(key, $"Reload rejected; old version is still active: {exception.Message}");
+            return PluginOperationResult.Fail(key, $"重载被拒绝，旧版本仍在运行：{exception.Message}");
         }
 
         current.Deactivate();
@@ -125,11 +125,11 @@ public sealed class LuaPluginManager : IDisposable
                 _plugins.Remove(key);
                 current.Dispose();
                 _logger.LogCritical(rollbackException, "Failed to restore Lua plugin {Script} after a rejected reload", key);
-                return PluginOperationResult.Fail(key, $"Reload and rollback both failed: {exception.Message}");
+                return PluginOperationResult.Fail(key, $"重载和回滚均失败：{exception.Message}");
             }
 
             _logger.LogError(exception, "Lua reload activation failed for {Script}; restored the old version", key);
-            return PluginOperationResult.Fail(key, $"Reload failed; old version restored: {exception.Message}");
+            return PluginOperationResult.Fail(key, $"重载失败，已恢复旧版本：{exception.Message}");
         }
 
         try
@@ -144,14 +144,14 @@ public sealed class LuaPluginManager : IDisposable
         current.Dispose();
         _plugins[key] = candidate;
         _logger.LogInformation("Reloaded Lua plugin {Name} v{Version}", candidate.Name, candidate.Version);
-        return PluginOperationResult.Ok(key, $"Reloaded {candidate.Name} v{candidate.Version}.");
+        return PluginOperationResult.Ok(key, $"已重载 {candidate.Name} v{candidate.Version}。");
     }
 
     public PluginOperationResult Unload(string key, bool hotReload = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         key = NormalizeKey(key);
-        if (!_plugins.Remove(key, out var plugin)) return PluginOperationResult.Fail(key, "Plugin is not loaded.");
+        if (!_plugins.Remove(key, out var plugin)) return PluginOperationResult.Fail(key, "插件尚未加载。");
 
         try
         {
@@ -167,7 +167,7 @@ public sealed class LuaPluginManager : IDisposable
         }
 
         _logger.LogInformation("Unloaded Lua plugin {Name}", plugin.Name);
-        return PluginOperationResult.Ok(key, $"Unloaded {plugin.Name}.");
+        return PluginOperationResult.Ok(key, $"已卸载 {plugin.Name}。");
     }
 
     public void RefreshFiles(IReadOnlyCollection<string> changedPaths)

@@ -77,7 +77,7 @@ public sealed class LuaApi
         _plugin.AddRegistration(new CommandRegistration(
             id,
             name.Trim(),
-            ReadString(options, "description", defaultValue: "Lua command"),
+            ReadString(options, "description", defaultValue: "Lua 命令"),
             ReadString(options, "permission", defaultValue: string.Empty),
             ReadBool(options, "allow_console", true),
             ReadInt(options, "min_args", 0),

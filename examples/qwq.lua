@@ -1,7 +1,7 @@
 local plugin = cs.plugin({
     name = "QwQ",
     version = "1.0.0",
-    description = "Replies when a player says qwq"
+    description = "玩家发送 qwq 时回复"
 })
 
 plugin:on("player_chat", function(event)

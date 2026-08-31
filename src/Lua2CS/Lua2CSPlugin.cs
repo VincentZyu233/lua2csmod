@@ -15,7 +15,7 @@ public sealed class Lua2CSPlugin : BasePlugin, IPluginConfig<Lua2CSConfig>
 
     public override string ModuleName => "Lua2CS";
     public override string ModuleVersion => "0.1.0";
-    public override string ModuleDescription => "Lua 5.4 plugin host for CounterStrikeSharp";
+    public override string ModuleDescription => "面向 CounterStrikeSharp 的 Lua 5.4 插件宿主";
     public Lua2CSConfig Config { get; set; } = new();
 
     public void OnConfigParsed(Lua2CSConfig config)
@@ -33,7 +33,7 @@ public sealed class Lua2CSPlugin : BasePlugin, IPluginConfig<Lua2CSConfig>
     {
         var scriptsDirectory = ResolveScriptsDirectory();
         _manager = new LuaPluginManager(this, Logger, scriptsDirectory, Config.AllowUnsafeLibraries);
-        AddCommand("css_lua", "Manage Lua2CS scripts", OnLuaCommand);
+        AddCommand("css_lua", "管理 Lua2CS 脚本", OnLuaCommand);
 
         foreach (var result in _manager.LoadAll().Where(result => !result.Success))
         {
@@ -62,7 +62,7 @@ public sealed class Lua2CSPlugin : BasePlugin, IPluginConfig<Lua2CSConfig>
         if (player is not null && !string.IsNullOrWhiteSpace(Config.AdminPermission)
                                && !AdminManager.PlayerHasPermissions(player, Config.AdminPermission))
         {
-            command.ReplyToCommand("You do not have permission to manage Lua plugins.");
+            command.ReplyToCommand("你没有管理 Lua 插件的权限。");
             return;
         }
 
@@ -89,14 +89,14 @@ public sealed class Lua2CSPlugin : BasePlugin, IPluginConfig<Lua2CSConfig>
                     foreach (var result in _manager.ReloadAll()) Reply(command, result);
                     break;
                 default:
-                    command.ReplyToCommand("Usage: css_lua [list|load|reload|unload|reload_all] [script]");
+                    command.ReplyToCommand("用法：css_lua [list|load|reload|unload|reload_all] [脚本名]");
                     break;
             }
         }
         catch (Exception exception)
         {
             Logger.LogError(exception, "Lua management command failed");
-            command.ReplyToCommand($"[Lua2CS] Error: {exception.Message}");
+            command.ReplyToCommand($"[Lua2CS] 错误：{exception.Message}");
         }
     }
 
@@ -104,13 +104,13 @@ public sealed class Lua2CSPlugin : BasePlugin, IPluginConfig<Lua2CSConfig>
     {
         if (_manager!.Plugins.Count == 0)
         {
-            command.ReplyToCommand("[Lua2CS] No Lua plugins are loaded.");
+            command.ReplyToCommand("[Lua2CS] 当前没有已加载的 Lua 插件。");
             return;
         }
 
         foreach (var plugin in _manager.Plugins.OrderBy(plugin => plugin.Key, StringComparer.OrdinalIgnoreCase))
         {
-            command.ReplyToCommand($"[Lua2CS] {plugin.Key}: {plugin.Name} v{plugin.Version} ({plugin.Registrations.Count} registrations)");
+            command.ReplyToCommand($"[Lua2CS] {plugin.Key}: {plugin.Name} v{plugin.Version}（{plugin.Registrations.Count} 个注册项）");
         }
     }
 
@@ -126,7 +126,7 @@ public sealed class Lua2CSPlugin : BasePlugin, IPluginConfig<Lua2CSConfig>
     }
 
     private static void Reply(CommandInfo command, PluginOperationResult result) =>
-        command.ReplyToCommand($"[Lua2CS] {(result.Success ? "OK" : "FAILED")}: {result.Message}");
+        command.ReplyToCommand($"[Lua2CS] {(result.Success ? "成功" : "失败")}：{result.Message}");
 
-    private static PluginOperationResult MissingName() => PluginOperationResult.Fail(string.Empty, "A script name is required.");
+    private static PluginOperationResult MissingName() => PluginOperationResult.Fail(string.Empty, "必须提供脚本名。");
 }

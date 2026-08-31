@@ -1,4 +1,4 @@
-name: Build prerelease
+name: 构建预发布版本
 
 on:
   push:
@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   build:
+    name: 构建、测试并发布
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,18 +23,18 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Restore
+      - name: 恢复依赖
         run: |
           dotnet restore Lua2CS.sln
           dotnet restore src/Lua2CS/Lua2CS.csproj --runtime linux-x64
 
-      - name: Test
+      - name: 运行测试
         run: dotnet test Lua2CS.sln --configuration Release --no-restore
 
-      - name: Package Linux x64 plugin
+      - name: 打包 Linux x64 插件
         run: ./package.sh --no-restore
 
-      - name: Replace prerelease
+      - name: 替换预发布版本
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -43,7 +44,7 @@ jobs:
           gh release create preview \
             artifacts/Lua2CS-preview-linux-x64.zip \
             --target "$GITHUB_SHA" \
-            --title "Lua2CS Preview" \
-            --notes "Automated prerelease build from commit $GITHUB_SHA." \
+            --title "Lua2CS 预发布版本" \
+            --notes "由提交 $GITHUB_SHA 自动构建。" \
             --prerelease \
             --latest=false

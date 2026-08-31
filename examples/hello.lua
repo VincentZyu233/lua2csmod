@@ -1,15 +1,15 @@
 local plugin = cs.plugin({
-    name = "Hello Lua",
+    name = "你好 Lua",
     version = "1.0.0",
-    description = "Minimal Lua2CS example"
+    description = "最小 Lua2CS 示例"
 })
 
 plugin:on_load(function(hot_reload)
-    cs.log.info("Hello from Lua 5.4; hot reload = " .. tostring(hot_reload))
+    cs.log.info("来自 Lua 5.4 的问候；是否热重载：" .. tostring(hot_reload))
 end)
 
 plugin:command("css_luahello", {
-    description = "Reply from a Lua plugin"
+    description = "从 Lua 插件回复"
 }, function(player, command)
-    command:reply("Hello from Lua 5.4!")
+    command:reply("你好，消息来自 Lua 5.4！")
 end)

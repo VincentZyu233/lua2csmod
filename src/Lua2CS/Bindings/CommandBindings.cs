@@ -25,21 +25,21 @@ public sealed class CommandBindings(BasePlugin host)
         {
             if (player is null && !registration.AllowConsole)
             {
-                command.ReplyToCommand("This command can only be used by a player.");
+                command.ReplyToCommand("此命令只能由游戏内玩家执行。");
                 return;
             }
 
             if (player is not null && !string.IsNullOrEmpty(registration.Permission)
                                    && !AdminManager.PlayerHasPermissions(player, registration.Permission))
             {
-                command.ReplyToCommand("You do not have permission to use this command.");
+                command.ReplyToCommand("你没有使用此命令的权限。");
                 return;
             }
 
             if (command.ArgCount - 1 < registration.MinArgs)
             {
                 var usage = string.IsNullOrEmpty(registration.Usage) ? string.Empty : $" {registration.Usage}";
-                command.ReplyToCommand($"Usage: {registration.Name}{usage}");
+                command.ReplyToCommand($"用法：{registration.Name}{usage}");
                 return;
             }
 
