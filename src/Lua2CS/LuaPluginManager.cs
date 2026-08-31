@@ -1,0 +1,288 @@
+using System.Reflection;
+using CounterStrikeSharp.API.Core;
+using Lua2CS.Bindings;
+using Microsoft.Extensions.Logging;
+
+namespace Lua2CS;
+
+public sealed class LuaPluginManager : IDisposable
+{
+    private readonly ILogger _logger;
+    private readonly string _scriptsDirectory;
+    private readonly LuaRuntime _runtime;
+    private readonly EventBindings _events;
+    private readonly ListenerBindings _listeners;
+    private readonly CommandBindings _commands;
+    private readonly TimerBindings _timers;
+    private readonly Dictionary<string, LuaPlugin> _plugins = new(StringComparer.OrdinalIgnoreCase);
+    private bool _disposed;
+
+    public LuaPluginManager(BasePlugin host, ILogger logger, string scriptsDirectory, bool allowUnsafeLibraries)
+    {
+        _logger = logger;
+        _scriptsDirectory = Path.GetFullPath(scriptsDirectory);
+        _runtime = new LuaRuntime(logger, allowUnsafeLibraries);
+        _events = new EventBindings(host);
+        _listeners = new ListenerBindings(host);
+        _commands = new CommandBindings(host);
+        _timers = new TimerBindings(host);
+        Directory.CreateDirectory(_scriptsDirectory);
+    }
+
+    public string ScriptsDirectory => _scriptsDirectory;
+    public IReadOnlyCollection<LuaPlugin> Plugins => _plugins.Values;
+
+    public IReadOnlyList<PluginOperationResult> LoadAll()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return Directory.EnumerateFiles(_scriptsDirectory, "*.lua", SearchOption.TopDirectoryOnly)
+            .Where(path => !Path.GetFileName(path).StartsWith('_'))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .Select(path => Load(Path.GetFileNameWithoutExtension(path)))
+            .ToArray();
+    }
+
+    public IReadOnlyList<PluginOperationResult> ReloadAll() => _plugins.Keys
+        .Union(Directory.EnumerateFiles(_scriptsDirectory, "*.lua").Select(path => Path.GetFileNameWithoutExtension(path)!), StringComparer.OrdinalIgnoreCase)
+        .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+        .Select(Reload)
+        .ToArray();
+
+    public PluginOperationResult Load(string key)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        key = NormalizeKey(key);
+        if (_plugins.ContainsKey(key)) return Reload(key);
+
+        var path = ResolveScriptPath(key);
+        if (!File.Exists(path)) return PluginOperationResult.Fail(key, "Script file does not exist.");
+
+        LuaPlugin? candidate = null;
+        try
+        {
+            candidate = _runtime.Prepare(path);
+            Validate(candidate, null);
+            candidate.Activate(
+                definition => Activate(candidate, definition),
+                definition => ValidateAndActivate(candidate, definition, null));
+            candidate.InvokeLifecycle(candidate.LoadCallback, false);
+            _plugins.Add(key, candidate);
+            _logger.LogInformation("Loaded Lua plugin {Name} v{Version} from {File}", candidate.Name, candidate.Version, Path.GetFileName(path));
+            return PluginOperationResult.Ok(key, $"Loaded {candidate.Name} v{candidate.Version}.");
+        }
+        catch (Exception exception)
+        {
+            candidate?.Dispose();
+            exception = Unwrap(exception);
+            _logger.LogError(exception, "Failed to load Lua script {Script}", key);
+            return PluginOperationResult.Fail(key, exception.Message);
+        }
+    }
+
+    public PluginOperationResult Reload(string key)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        key = NormalizeKey(key);
+        if (!_plugins.TryGetValue(key, out var current)) return Load(key);
+
+        var path = ResolveScriptPath(key);
+        if (!File.Exists(path)) return Unload(key);
+
+        LuaPlugin? candidate = null;
+        try
+        {
+            candidate = _runtime.Prepare(path);
+            Validate(candidate, current);
+        }
+        catch (Exception exception)
+        {
+            candidate?.Dispose();
+            exception = Unwrap(exception);
+            _logger.LogError(exception, "Lua reload validation failed for {Script}; keeping the old version", key);
+            return PluginOperationResult.Fail(key, $"Reload rejected; old version is still active: {exception.Message}");
+        }
+
+        current.Deactivate();
+        try
+        {
+            candidate.Activate(
+                definition => Activate(candidate, definition),
+                definition => ValidateAndActivate(candidate, definition, current));
+            candidate.InvokeLifecycle(candidate.LoadCallback, true);
+        }
+        catch (Exception exception)
+        {
+            candidate.Dispose();
+            exception = Unwrap(exception);
+            try
+            {
+                current.Activate(
+                    definition => Activate(current, definition),
+                    definition => ValidateAndActivate(current, definition, null));
+            }
+            catch (Exception rollbackException)
+            {
+                _plugins.Remove(key);
+                current.Dispose();
+                _logger.LogCritical(rollbackException, "Failed to restore Lua plugin {Script} after a rejected reload", key);
+                return PluginOperationResult.Fail(key, $"Reload and rollback both failed: {exception.Message}");
+            }
+
+            _logger.LogError(exception, "Lua reload activation failed for {Script}; restored the old version", key);
+            return PluginOperationResult.Fail(key, $"Reload failed; old version restored: {exception.Message}");
+        }
+
+        try
+        {
+            current.InvokeLifecycle(current.UnloadCallback, true);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Old Lua plugin {Script} failed during on_unload", key);
+        }
+
+        current.Dispose();
+        _plugins[key] = candidate;
+        _logger.LogInformation("Reloaded Lua plugin {Name} v{Version}", candidate.Name, candidate.Version);
+        return PluginOperationResult.Ok(key, $"Reloaded {candidate.Name} v{candidate.Version}.");
+    }
+
+    public PluginOperationResult Unload(string key, bool hotReload = false)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        key = NormalizeKey(key);
+        if (!_plugins.Remove(key, out var plugin)) return PluginOperationResult.Fail(key, "Plugin is not loaded.");
+
+        try
+        {
+            plugin.InvokeLifecycle(plugin.UnloadCallback, hotReload);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Lua plugin {Script} failed during on_unload", key);
+        }
+        finally
+        {
+            plugin.Dispose();
+        }
+
+        _logger.LogInformation("Unloaded Lua plugin {Name}", plugin.Name);
+        return PluginOperationResult.Ok(key, $"Unloaded {plugin.Name}.");
+    }
+
+    public void RefreshFiles(IReadOnlyCollection<string> changedPaths)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var reloadAll = changedPaths.Any(path => !Path.GetDirectoryName(Path.GetFullPath(path))!
+            .Equals(_scriptsDirectory, StringComparison.Ordinal));
+
+        if (reloadAll)
+        {
+            ReloadAll();
+            return;
+        }
+
+        foreach (var key in changedPaths.Select(Path.GetFileNameWithoutExtension).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            Reload(key!);
+        }
+    }
+
+    public static string NormalizeKey(string key)
+    {
+        key = Path.GetFileNameWithoutExtension(key.Trim());
+        if (string.IsNullOrEmpty(key) || key.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || key is "." or "..")
+        {
+            throw new ArgumentException("Invalid Lua plugin name.", nameof(key));
+        }
+        return key;
+    }
+
+    public void Dispose()
+    {
+        Shutdown(false);
+    }
+
+    public void Shutdown(bool hotReload)
+    {
+        if (_disposed) return;
+        foreach (var key in _plugins.Keys.ToArray()) Unload(key, hotReload);
+        _disposed = true;
+    }
+
+    private void Validate(LuaPlugin candidate, LuaPlugin? replacing)
+    {
+        var commands = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var registration in candidate.Registrations)
+        {
+            switch (registration)
+            {
+                case EventRegistration gameEvent:
+                    _events.Validate(gameEvent);
+                    break;
+                case ListenerRegistration listener:
+                    _listeners.Validate(listener);
+                    break;
+                case CommandRegistration command:
+                    _commands.Validate(command);
+                    if (!commands.Add(command.Name)) throw new InvalidDataException($"Duplicate Lua command '{command.Name}'.");
+                    break;
+                case TimerRegistration timer:
+                    _timers.Validate(timer);
+                    break;
+                default:
+                    throw new NotSupportedException($"Unsupported Lua registration {registration.GetType().Name}.");
+            }
+        }
+
+        var existingCommands = _plugins.Values
+            .Where(plugin => !ReferenceEquals(plugin, candidate) && !ReferenceEquals(plugin, replacing))
+            .SelectMany(plugin => plugin.Registrations)
+            .OfType<CommandRegistration>()
+            .Select(command => command.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var conflict = commands.FirstOrDefault(existingCommands.Contains);
+        if (conflict is not null) throw new InvalidDataException($"Lua command '{conflict}' is already registered by another Lua plugin.");
+    }
+
+    private IRegistrationHandle Activate(LuaPlugin plugin, RegistrationDefinition definition) => definition switch
+    {
+        EventRegistration gameEvent => _events.Activate(plugin, gameEvent),
+        ListenerRegistration listener => _listeners.Activate(plugin, listener),
+        CommandRegistration command => _commands.Activate(plugin, command),
+        TimerRegistration timer => _timers.Activate(plugin, timer),
+        _ => throw new NotSupportedException($"Unsupported Lua registration {definition.GetType().Name}.")
+    };
+
+    private IRegistrationHandle ValidateAndActivate(
+        LuaPlugin plugin,
+        RegistrationDefinition definition,
+        LuaPlugin? replacing)
+    {
+        Validate(plugin, replacing);
+        return Activate(plugin, definition);
+    }
+
+    private string ResolveScriptPath(string key)
+    {
+        var path = Path.GetFullPath(Path.Combine(_scriptsDirectory, key + ".lua"));
+        if (!Path.GetDirectoryName(path)!.Equals(_scriptsDirectory, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Script path escapes the configured scripts directory.");
+        }
+        return path;
+    }
+
+    private static Exception Unwrap(Exception exception)
+    {
+        while (exception is TargetInvocationException { InnerException: not null }) exception = exception.InnerException;
+        return exception;
+    }
+}
+
+public sealed record PluginOperationResult(string Key, bool Success, string Message)
+{
+    public static PluginOperationResult Ok(string key, string message) => new(key, true, message);
+    public static PluginOperationResult Fail(string key, string message) => new(key, false, message);
+}

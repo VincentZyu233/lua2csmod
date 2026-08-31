@@ -1,0 +1,49 @@
+name: Build prerelease
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lua2cs-prerelease
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: |
+          dotnet restore Lua2CS.sln
+          dotnet restore src/Lua2CS/Lua2CS.csproj --runtime linux-x64
+
+      - name: Test
+        run: dotnet test Lua2CS.sln --configuration Release --no-restore
+
+      - name: Package Linux x64 plugin
+        run: ./package.sh --no-restore
+
+      - name: Replace prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view preview >/dev/null 2>&1; then
+            gh release delete preview --cleanup-tag --yes
+          fi
+          gh release create preview \
+            artifacts/Lua2CS-preview-linux-x64.zip \
+            --target "$GITHUB_SHA" \
+            --title "Lua2CS Preview" \
+            --notes "Automated prerelease build from commit $GITHUB_SHA." \
+            --prerelease \
+            --latest=false
