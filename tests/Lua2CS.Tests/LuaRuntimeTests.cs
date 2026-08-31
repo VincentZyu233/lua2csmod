@@ -472,6 +472,19 @@ public sealed class LuaRuntimeTests : IDisposable
         Assert.False(string.IsNullOrWhiteSpace(plugin.Name));
     }
 
+    [Fact]
+    public void ShippedTpaCommandsAreAvailableToEveryPlayerWithoutAcceptArguments()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "examples", "tpa.lua");
+        using var plugin = new LuaRuntime(NullLogger.Instance, false).Prepare(path);
+        var commands = plugin.Registrations.OfType<CommandRegistration>().ToDictionary(item => item.Name);
+
+        Assert.Equal(["css_tpa", "css_tpaccept", "css_tpdeny", "css_tpcancel"], commands.Keys);
+        Assert.All(commands.Values, command => Assert.True(string.IsNullOrEmpty(command.Permission)));
+        Assert.Equal(1, commands["css_tpa"].MinArgs);
+        Assert.Equal(0, commands["css_tpaccept"].MinArgs);
+    }
+
     [Theory]
     [InlineData("DmgArmor", "dmg_armor")]
     [InlineData("Userid", "userid")]

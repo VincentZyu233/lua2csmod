@@ -1,7 +1,7 @@
 local plugin = cs.plugin({
     name = "玩家传送请求",
-    version = "1.0.0",
-    description = "提供类似 Minecraft TPA 的玩家间传送请求"
+    version = "1.1.0",
+    description = "提供不限制阵营和回合状态的宽松玩家传送请求"
 })
 
 local request_timeout = 30
@@ -78,9 +78,12 @@ local function select_request(player, query, command)
     end
 
     if query == nil then
-        if #requests == 1 then return requests[1] end
-        command:reply("有多个待处理请求，请使用 css_tpaccept <玩家> 或 css_tpdeny <玩家> 指定玩家。")
-        return nil
+        -- 与常见 TPA 体验一致：不写玩家名时直接处理最新收到的有效请求。
+        local latest = requests[1]
+        for index = 2, #requests do
+            if requests[index].id > latest.id then latest = requests[index] end
+        end
+        return latest
     end
 
     local sender = find_one_player(query, command)
@@ -173,7 +176,9 @@ plugin:command("css_tpaccept", {
         return
     end
 
-    -- 清零速度可避免请求者带着跳跃、坠落或投掷产生的动量抵达目标点。
+    -- 这是娱乐服的宽松传送：不检查阵营、回合/冻结状态、战斗状态、
+    -- 导航网格、目标是否在空中或坐标是否处于地图边界内，只要求双方仍有有效位置。
+    -- 清零速度可避免请求者把原来的跳跃或坠落动量一并带到目标点。
     if not sender:teleport(target.position, target.eye_angles, cs.vec3(0, 0, 0)) then
         command:reply("传送失败，请稍后重试。")
         return

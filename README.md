@@ -12,12 +12,25 @@ Lua2CS 是面向 CounterStrikeSharp 的 Lua 5.4 插件宿主。C# 宿主只需�
 
 1. 从 [预发布版本](https://github.com/ra1nyxin/lua2csmod/releases/tag/preview) 下载服务器系统对应的安装包：Linux 使用 `Lua2CS-preview-linux-x64.zip`，Windows 使用 `Lua2CS-preview-win-x64.zip`。
 2. 将压缩包解压到服务器的 `game/csgo` 目录。
-3. 把 Lua 脚本放入 `addons/counterstrikesharp/plugins/Lua2CS/scripts`。
-4. 重启服务器，或执行 `css_plugins load Lua2CS`。
+3. 重启服务器，或执行 `css_plugins load Lua2CS`。
+4. 安装包默认启用 TPA；其他 Lua 脚本可继续放入 `addons/counterstrikesharp/plugins/Lua2CS/scripts`。
 
 两个压缩包都已包含 NLua、KeraLua 及对应系统的 Lua 5.4 原生库，不需要在服务器上额外安装 Lua。Linux 包携带 `liblua54.so`，Windows 包携带 `lua54.dll`，请勿混用。Linux 包中的 Lua 5.4.8 使用 ELF 私有符号绑定构建，可避免 CS2 `libvscript.so` 导出的旧版 Lua 符号抢占 NLua 内部调用。
 
 Lua2CS 在加载时会立即创建临时 Lua VM，检查原生库确实可用且版本为 Lua 5.4。安装后可在服务器控制台执行 `css_lua status`，查看 Lua、CounterStrikeSharp、运行平台、自动重载状态和实际脚本目录。即使 `scripts` 目录为空，这项自检也会执行。
+
+## 默认 TPA
+
+首次安装会直接启用 `scripts/tpa.lua`，所有游戏内玩家均可使用：
+
+```text
+!tpa <玩家>
+!tpaccept [玩家]
+!tpdeny [玩家]
+!tpcancel
+```
+
+`!tpaccept` 不写玩家名时会接受最新收到的有效请求，写玩家名时可处理指定请求。TPA 不限制敌我阵营、回合阶段、冻结时间、交战状态、空中位置、导航网格或地图边界；只要双方仍在线、存活且具有有效玩家实体和位置，就会尝试把请求者传送到接受者的精确坐标。命令没有管理员权限要求。删除 `scripts/tpa.lua` 并执行 `css_lua unload tpa` 即可停用；重新解压新版安装包时会恢复官方 TPA 文件。
 
 ## 脚本示例
 
@@ -102,7 +115,7 @@ Lua 与 C# 之间的字符串统一使用 UTF-8，可直接使用中文插件名
 
 `examples` 中包含 36 个可独立加载的中文模板和 1 个公共模块示例，覆盖基础命令、聊天与冷却、事件统计、回合玩法、管理员工具、玩家间传送请求、菜单、玩家和武器、弹药、计分板、语音、ConVar、实体、导航、模型、持久化、HUD、地图及模块化脚本。模板包含关键流程、快照时效、身份校验和风险点的中文注释。
 
-模板默认不会自动运行；首次安装时 `scripts` 目录为空，因此除宿主管理和自检命令外不会改变游戏玩法。安装包将模板放在插件的 `examples` 目录中，选中后复制到同级 `scripts` 目录即可加载，后续保存文件会自动热重载。
+除 TPA 外的模板默认不会自动运行。安装包会把 TPA 同时放入 `scripts` 和 `examples`，其余模板只放在 `examples`；选中其他模板后复制到同级 `scripts` 目录即可加载，后续保存文件会自动热重载。
 
 完整接口参见 [Lua 脚本接口](docs/lua-api.md)，可运行示例位于 [examples](examples)。
 

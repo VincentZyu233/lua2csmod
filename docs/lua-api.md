@@ -2,7 +2,7 @@
 
 ## 宿主状态与管理
 
-首次安装时 `scripts` 目录为空，示例模板不会自动运行。Lua2CS 仍会在启动阶段探测 Lua 5.4 原生运行库；服务器控制台可执行 `css_lua status` 查看 Lua 版本、CounterStrikeSharp 版本、平台、自动重载状态、脚本目录和已加载数量。`css_lua doctor` 是同一命令的别名。
+首次安装时会默认加载 `scripts/tpa.lua`，其他示例模板不会自动运行。TPA 命令、宽松规则和停用方法参见 README 的“默认 TPA”章节。Lua2CS 会在启动阶段探测 Lua 5.4 原生运行库；服务器控制台可执行 `css_lua status` 查看 Lua 版本、CounterStrikeSharp 版本、平台、自动重载状态、脚本目录和已加载数量。`css_lua doctor` 是同一命令的别名。
 
 其他管理命令包括 `css_lua list`、`css_lua load <脚本名>`、`css_lua reload <脚本名>`、`css_lua unload <脚本名>` 和 `css_lua reload_all`。游戏内默认需要 `@css/root` 权限，服务器控制台和 RCON 不受该权限限制。
 

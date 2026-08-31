@@ -37,6 +37,7 @@ package_runtime() {
     cp "$publish_dir/NLua.dll" "$publish_dir/KeraLua.dll" "$plugin_dir/"
     cp "$publish_dir/$native_library" "$plugin_dir/"
     cp -R "$project_root"/examples/. "$plugin_dir/examples/"
+    cp "$project_root/examples/tpa.lua" "$plugin_dir/scripts/tpa.lua"
 
     (
         cd "$stage_dir"
