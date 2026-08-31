@@ -1,7 +1,7 @@
 local plugin = cs.plugin({
     name = "awa",
     version = "0.0.1",
-    description = "玩家发送 awa 时回复"
+    description = "玩家发送 awa 时回复，并播报真人玩家进服和离服"
 })
 
 plugin:on("player_chat", function(event)
@@ -19,5 +19,23 @@ plugin:on("player_connect_full", function(event)
         cs.server.print_chat_all(cs.colors.green .. "awa!!!" .. cs.colors.default)
     end
 
+    return cs.continue
+end)
+
+plugin:on("player_disconnect", function(event)
+    -- 只播报曾完整进入服务器的真人；玩家对象失效时用 networkid 排除 Bot。
+    if not event.ever_fully_connected then
+        return cs.continue
+    end
+
+    if event.player ~= nil then
+        if event.player.is_bot or event.player.is_hltv then
+            return cs.continue
+        end
+    elseif event.networkid == nil or event.networkid == "" or event.networkid:upper() == "BOT" then
+        return cs.continue
+    end
+
+    cs.server.print_chat_all(cs.colors.green .. "awa...." .. cs.colors.default)
     return cs.continue
 end)
