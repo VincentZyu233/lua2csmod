@@ -28,6 +28,10 @@ package_runtime() {
         --output "$publish_dir" \
         "${restore_args[@]}"
 
+    if [[ "$runtime" == "linux-x64" ]]; then
+        "$project_root/scripts/build-lua54-linux.sh" "$publish_dir/$native_library"
+    fi
+
     mkdir -p "$plugin_dir/scripts" "$plugin_dir/examples"
     cp "$publish_dir/Lua2CS.dll" "$publish_dir/Lua2CS.deps.json" "$plugin_dir/"
     cp "$publish_dir/NLua.dll" "$publish_dir/KeraLua.dll" "$plugin_dir/"

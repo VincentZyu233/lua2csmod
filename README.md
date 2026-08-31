@@ -15,7 +15,7 @@ Lua2CS 是面向 CounterStrikeSharp 的 Lua 5.4 插件宿主。C# 宿主只需�
 3. 把 Lua 脚本放入 `addons/counterstrikesharp/plugins/Lua2CS/scripts`。
 4. 重启服务器，或执行 `css_plugins load Lua2CS`。
 
-两个压缩包都已包含 NLua、KeraLua 及对应系统的 Lua 5.4 原生库，不需要在服务器上额外安装 Lua。Linux 包携带 `liblua54.so`，Windows 包携带 `lua54.dll`，请勿混用。
+两个压缩包都已包含 NLua、KeraLua 及对应系统的 Lua 5.4 原生库，不需要在服务器上额外安装 Lua。Linux 包携带 `liblua54.so`，Windows 包携带 `lua54.dll`，请勿混用。Linux 包中的 Lua 5.4.8 使用 ELF 私有符号绑定构建，可避免 CS2 `libvscript.so` 导出的旧版 Lua 符号抢占 NLua 内部调用。
 
 Lua2CS 在加载时会立即创建临时 Lua VM，检查原生库确实可用且版本为 Lua 5.4。安装后可在服务器控制台执行 `css_lua status`，查看 Lua、CounterStrikeSharp、运行平台、自动重载状态和实际脚本目录。即使 `scripts` 目录为空，这项自检也会执行。
 
@@ -113,6 +113,8 @@ dotnet restore
 dotnet test -c Release
 ./package.sh
 ```
+
+Linux 打包还需要 `curl`、`tar`、glibc C 编译器和 GNU binutils。构建脚本会下载固定版本的 Lua 5.4.8 源码、校验 SHA-256，再生成带 `SYMBOLIC` 标记且最高兼容到 glibc 2.35 的原生库；若产物意外引用更新的 glibc 符号，打包会直接失败。可通过 `LUA2CS_NATIVE_CACHE` 指定源码缓存目录。
 
 脚本会同时生成以下服务器安装包：
 
