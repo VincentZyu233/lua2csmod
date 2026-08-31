@@ -508,5 +508,8 @@ scripts/
 | `bomb_announcer.lua` | 中文播报 C4 状态变化 | 炸弹事件、聊天颜色 |
 | `aim_inspector.lua` | 查询准星所指玩家 | 准星目标、玩家快照 |
 | `team_summary.lua` | 汇总双方人数和存活状态 | 玩家集合、队伍常量 |
+| `tpa.lua` | 玩家间传送请求、接受、拒绝和取消 | 玩家查找、身份校验、定时器、传送 |
+
+`tpa.lua` 注册 `css_tpa <玩家>`、`css_tpaccept [玩家]`、`css_tpdeny [玩家]` 和 `css_tpcancel`。玩家也可在聊天框中使用对应的 `!tpa`、`!tpaccept`、`!tpdeny` 和 `!tpcancel`。请求在 30 秒后自动过期；只有一个待处理请求时可以省略接受或拒绝命令的玩家参数，同时收到多个请求时必须指定玩家。
 
 安装包中的模板位于 `addons/counterstrikesharp/plugins/Lua2CS/examples`。复制需要启用的顶层模板到同级 `scripts` 目录；`module_demo.lua` 还需要同时复制 `modules` 子目录。

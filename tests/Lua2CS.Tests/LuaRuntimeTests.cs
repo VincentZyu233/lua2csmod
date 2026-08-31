@@ -460,6 +460,7 @@ public sealed class LuaRuntimeTests : IDisposable
     [InlineData("bomb_announcer.lua")]
     [InlineData("aim_inspector.lua")]
     [InlineData("team_summary.lua")]
+    [InlineData("tpa.lua")]
     public void ShippedExamplesLoad(string fileName)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "examples", fileName);

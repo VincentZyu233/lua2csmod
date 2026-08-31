@@ -1,0 +1,235 @@
+local plugin = cs.plugin({
+    name = "玩家传送请求",
+    version = "1.0.0",
+    description = "提供类似 Minecraft TPA 的玩家间传送请求"
+})
+
+local request_timeout = 30
+local next_request_id = 0
+
+-- 请求全部以 SteamID64 关联，不能用 slot 保存长期身份：玩家离服后 slot 会被复用。
+-- outgoing 的键是请求者，incoming 的第一层键是接收者，方便从两个方向查找和清理。
+local outgoing = {}
+local incoming = {}
+
+local function now()
+    return cs.server.info().ticked_time
+end
+
+local function remove_request(request)
+    if outgoing[request.sender_id] == request then
+        outgoing[request.sender_id] = nil
+    end
+
+    local requests = incoming[request.target_id]
+    if requests ~= nil then
+        requests[request.sender_id] = nil
+        if next(requests) == nil then incoming[request.target_id] = nil end
+    end
+end
+
+local function notify_online(steam_id, message)
+    local player = cs.players.get_steamid(steam_id)
+    if player ~= nil then player:print_chat(message) end
+end
+
+local function expire_request(request)
+    -- 玩家可能取消请求后又发送了新请求，因此定时器必须确认自己仍对应当前请求。
+    if outgoing[request.sender_id] ~= request then return end
+
+    remove_request(request)
+    notify_online(request.sender_id, "向 " .. request.target_name .. " 发送的传送请求已过期。")
+    notify_online(request.target_id, request.sender_name .. " 的传送请求已过期。")
+end
+
+local function find_one_player(query, command)
+    local matches = cs.players.find(query)
+    if #matches == 0 then
+        command:reply("没有找到玩家：" .. query)
+        return nil
+    end
+    if #matches > 1 then
+        command:reply("匹配到多名玩家，请输入更完整的名字、槽位、userid 或 SteamID64。")
+        return nil
+    end
+    return matches[1]
+end
+
+local function current_requests(target_id)
+    local result = {}
+    local requests = incoming[target_id]
+    if requests == nil then return result end
+
+    for _, request in pairs(requests) do
+        if request.expires_at <= now() then
+            expire_request(request)
+        else
+            result[#result + 1] = request
+        end
+    end
+    return result
+end
+
+local function select_request(player, query, command)
+    local requests = current_requests(player.steam_id)
+    if #requests == 0 then
+        command:reply("当前没有等待处理的传送请求。")
+        return nil
+    end
+
+    if query == nil then
+        if #requests == 1 then return requests[1] end
+        command:reply("有多个待处理请求，请使用 css_tpaccept <玩家> 或 css_tpdeny <玩家> 指定玩家。")
+        return nil
+    end
+
+    local sender = find_one_player(query, command)
+    if sender == nil then return nil end
+
+    local request = outgoing[sender.steam_id]
+    if request == nil or request.target_id ~= player.steam_id then
+        command:reply(sender.name .. " 没有向你发送传送请求。")
+        return nil
+    end
+    return request
+end
+
+plugin:command("css_tpa", {
+    description = "请求传送到另一名玩家身边",
+    allow_console = false,
+    min_args = 1,
+    usage = "<玩家>"
+}, function(player, command)
+    local target = find_one_player(command.args[1], command)
+    if target == nil then return end
+    if target.steam_id == player.steam_id then
+        command:reply("不能向自己发送传送请求。")
+        return
+    end
+    -- 机器人和 HLTV 无法主动执行接受命令，因此不允许把请求发给它们。
+    if target.is_bot or target.is_hltv then
+        command:reply("不能向机器人或 HLTV 发送传送请求。")
+        return
+    end
+
+    local old_request = outgoing[player.steam_id]
+    if old_request ~= nil then
+        if old_request.expires_at <= now() then
+            expire_request(old_request)
+        else
+            command:reply("你已经向 " .. old_request.target_name .. " 发送过请求，请等待处理或使用 css_tpcancel 取消。")
+            return
+        end
+    end
+
+    next_request_id = next_request_id + 1
+    local request = {
+        id = next_request_id,
+        sender_id = player.steam_id,
+        sender_name = player.name,
+        target_id = target.steam_id,
+        target_name = target.name,
+        expires_at = now() + request_timeout
+    }
+    outgoing[request.sender_id] = request
+    incoming[request.target_id] = incoming[request.target_id] or {}
+    incoming[request.target_id][request.sender_id] = request
+
+    command:reply("已向 " .. target.name .. " 发送传送请求，" .. request_timeout .. " 秒后过期。")
+    target:print_chat(player.name .. " 请求传送到你身边。输入 !tpaccept 接受，或 !tpdeny 拒绝。")
+
+    plugin:after(request_timeout, function()
+        -- id 检查让旧定时器无法误删同一玩家后来创建的新请求。
+        local current = outgoing[request.sender_id]
+        if current ~= nil and current.id == request.id then expire_request(current) end
+    end, { stop_on_map_change = false })
+end)
+
+plugin:command("css_tpaccept", {
+    description = "接受一名玩家的传送请求",
+    allow_console = false,
+    usage = "[玩家]"
+}, function(player, command)
+    local request = select_request(player, command.args[1], command)
+    if request == nil then return end
+
+    -- 重新按 SteamID64 获取快照，确保请求期间没有离服或发生 slot 身份变化。
+    local sender = cs.players.get_steamid(request.sender_id)
+    local target = player:refresh()
+    if sender == nil then
+        remove_request(request)
+        command:reply(request.sender_name .. " 已经离开服务器，请求已取消。")
+        return
+    end
+    if target == nil or target.steam_id ~= request.target_id then
+        return
+    end
+    if not sender.is_alive then
+        command:reply(sender.name .. " 当前未存活，暂时无法传送。")
+        return
+    end
+    if not target.is_alive or target.position == nil then
+        command:reply("你当前未存活或位置无效，暂时无法接受传送。")
+        return
+    end
+
+    -- 清零速度可避免请求者带着跳跃、坠落或投掷产生的动量抵达目标点。
+    if not sender:teleport(target.position, target.eye_angles, cs.vec3(0, 0, 0)) then
+        command:reply("传送失败，请稍后重试。")
+        return
+    end
+
+    remove_request(request)
+    command:reply("已接受 " .. sender.name .. " 的传送请求。")
+    sender:print_chat("传送请求已被 " .. target.name .. " 接受。")
+end)
+
+plugin:command("css_tpdeny", {
+    description = "拒绝一名玩家的传送请求",
+    allow_console = false,
+    usage = "[玩家]"
+}, function(player, command)
+    local request = select_request(player, command.args[1], command)
+    if request == nil then return end
+
+    remove_request(request)
+    command:reply("已拒绝 " .. request.sender_name .. " 的传送请求。")
+    notify_online(request.sender_id, request.target_name .. " 拒绝了你的传送请求。")
+end)
+
+plugin:command("css_tpcancel", {
+    description = "取消自己发出的传送请求",
+    allow_console = false
+}, function(player, command)
+    local request = outgoing[player.steam_id]
+    if request == nil then
+        command:reply("你当前没有等待处理的传送请求。")
+        return
+    end
+
+    remove_request(request)
+    command:reply("已取消向 " .. request.target_name .. " 发送的传送请求。")
+    notify_online(request.target_id, request.sender_name .. " 取消了传送请求。")
+end)
+
+plugin:listen("OnClientDisconnect", function(slot)
+    local player = cs.players.get(slot)
+    if player == nil then return end
+
+    -- 请求者离服时移除其发出的请求；接收者离服时移除发给他的全部请求。
+    local sent = outgoing[player.steam_id]
+    if sent ~= nil then
+        remove_request(sent)
+        notify_online(sent.target_id, sent.sender_name .. " 已离开服务器，传送请求已取消。")
+    end
+
+    local received = incoming[player.steam_id]
+    if received ~= nil then
+        local copy = {}
+        for _, request in pairs(received) do copy[#copy + 1] = request end
+        for _, request in ipairs(copy) do
+            remove_request(request)
+            notify_online(request.sender_id, request.target_name .. " 已离开服务器，传送请求已取消。")
+        end
+    end
+end)
