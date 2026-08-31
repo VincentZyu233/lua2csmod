@@ -26,11 +26,30 @@ public sealed record CommandRegistration(
     string Usage,
     LuaFunction Callback) : RegistrationDefinition(Id);
 
+public sealed record CommandListenerRegistration(
+    long Id,
+    string Name,
+    HookMode Mode,
+    LuaFunction Callback) : RegistrationDefinition(Id);
+
 public sealed record TimerRegistration(
     long Id,
     float Interval,
     bool Repeat,
     bool StopOnMapChange,
+    LuaFunction Callback) : RegistrationDefinition(Id);
+
+public enum FrameSchedule
+{
+    NextFrame,
+    NextWorldUpdate,
+    AfterTicks
+}
+
+public sealed record FrameRegistration(
+    long Id,
+    FrameSchedule Schedule,
+    int TickDelay,
     LuaFunction Callback) : RegistrationDefinition(Id);
 
 public interface IRegistrationHandle : IDisposable

@@ -12,7 +12,9 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         local register_event = __lua2cs_register_event
         local register_listener = __lua2cs_register_listener
         local register_command = __lua2cs_register_command
+        local register_command_listener = __lua2cs_register_command_listener
         local register_timer = __lua2cs_register_timer
+        local register_frame = __lua2cs_register_frame
         local register_load = __lua2cs_register_load
         local register_unload = __lua2cs_register_unload
         local cancel_registration = __lua2cs_cancel_registration
@@ -49,6 +51,8 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         local entities_find = __lua2cs_entities_find
         local entities_get = __lua2cs_entities_get
         local entities_create = __lua2cs_entities_create
+        local weapons_get = __lua2cs_weapons_get
+        local weapons_find = __lua2cs_weapons_find
         local entity_refresh = __lua2cs_entity_refresh
         local entity_spawn = __lua2cs_entity_spawn
         local entity_input = __lua2cs_entity_input
@@ -60,6 +64,8 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         local entity_set_model = __lua2cs_entity_set_model
         local entity_set_render_color = __lua2cs_entity_set_render_color
         local entity_emit_sound = __lua2cs_entity_emit_sound
+        local weapon_set_ammo = __lua2cs_weapon_set_ammo
+        local weapon_set_econ = __lua2cs_weapon_set_econ
         local players_all = __lua2cs_players_all
         local players_get = __lua2cs_players_get
         local players_get_userid = __lua2cs_players_get_userid
@@ -81,6 +87,7 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         local player_convar = __lua2cs_player_convar
         local player_execute = __lua2cs_player_execute
         local player_give_item = __lua2cs_player_give_item
+        local player_give_weapon = __lua2cs_player_give_weapon
         local player_remove_item = __lua2cs_player_remove_item
         local player_remove_weapons = __lua2cs_player_remove_weapons
         local player_drop_weapon = __lua2cs_player_drop_weapon
@@ -176,6 +183,12 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
                 create = function(designer_name, spawn)
                     if spawn == nil then spawn = true end
                     return entities_create(designer_name, spawn)
+                end
+            },
+            weapons = {
+                get = weapons_get,
+                find = function(designer_name, limit)
+                    return weapons_find(designer_name, limit or 128)
                 end
             },
             team = {
@@ -293,6 +306,14 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
                 return register_command(name, options or {}, callback)
             end
 
+            function plugin:command_listener(name, options, callback)
+                if type(options) == "function" then
+                    callback = options
+                    options = {}
+                end
+                return register_command_listener(name, options or {}, callback)
+            end
+
             function plugin:timer(interval, callback, options)
                 return register_timer(interval, callback, options or {})
             end
@@ -307,6 +328,18 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
                 options = options or {}
                 options.repeating = true
                 return register_timer(interval, callback, options)
+            end
+
+            function plugin:next_frame(callback)
+                return register_frame("next_frame", 0, callback)
+            end
+
+            function plugin:next_world_update(callback)
+                return register_frame("next_world_update", 0, callback)
+            end
+
+            function plugin:after_ticks(ticks, callback)
+                return register_frame("after_ticks", ticks, callback)
             end
 
             function plugin:on_load(callback)
@@ -390,6 +423,11 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         function __lua2cs_player_give_item_method(self, designer_name)
             local slot = current_player_slot(self)
             return slot ~= nil and player_give_item(slot, designer_name) or false
+        end
+
+        function __lua2cs_player_give_weapon_method(self, designer_name, options)
+            local slot = current_player_slot(self)
+            return slot ~= nil and player_give_weapon(slot, designer_name, options) or nil
         end
 
         function __lua2cs_player_remove_item_method(self, designer_name)
@@ -577,6 +615,27 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
             return entity_emit_sound(self.handle, sound_event_name, volume or 1, pitch or 0)
         end
 
+        function __lua2cs_weapon_refresh_method(self)
+            return weapons_get(self.handle)
+        end
+
+        function __lua2cs_weapon_set_ammo_method(self, clip, reserve, clip_secondary, reserve_secondary)
+            if clip == nil and reserve == nil and clip_secondary == nil and reserve_secondary == nil then
+                error("至少需要提供一个弹药数量", 2)
+            end
+            return weapon_set_ammo(
+                self.handle,
+                clip or -1,
+                reserve or -1,
+                clip_secondary or -1,
+                reserve_secondary or -1
+            )
+        end
+
+        function __lua2cs_weapon_set_econ_method(self, options)
+            return weapon_set_econ(self.handle, options or {})
+        end
+
         function __lua2cs_command_reply_method(self, message)
             return command_reply(self.__context_id, message)
         end
@@ -588,7 +647,9 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         __lua2cs_register_event = nil
         __lua2cs_register_listener = nil
         __lua2cs_register_command = nil
+        __lua2cs_register_command_listener = nil
         __lua2cs_register_timer = nil
+        __lua2cs_register_frame = nil
         __lua2cs_register_load = nil
         __lua2cs_register_unload = nil
         __lua2cs_cancel_registration = nil
@@ -625,6 +686,8 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         __lua2cs_entities_find = nil
         __lua2cs_entities_get = nil
         __lua2cs_entities_create = nil
+        __lua2cs_weapons_get = nil
+        __lua2cs_weapons_find = nil
         __lua2cs_entity_refresh = nil
         __lua2cs_entity_spawn = nil
         __lua2cs_entity_input = nil
@@ -636,6 +699,8 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         __lua2cs_entity_set_model = nil
         __lua2cs_entity_set_render_color = nil
         __lua2cs_entity_emit_sound = nil
+        __lua2cs_weapon_set_ammo = nil
+        __lua2cs_weapon_set_econ = nil
         __lua2cs_players_all = nil
         __lua2cs_players_get = nil
         __lua2cs_players_get_userid = nil
@@ -657,6 +722,7 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         __lua2cs_player_convar = nil
         __lua2cs_player_execute = nil
         __lua2cs_player_give_item = nil
+        __lua2cs_player_give_weapon = nil
         __lua2cs_player_remove_item = nil
         __lua2cs_player_remove_weapons = nil
         __lua2cs_player_drop_weapon = nil
@@ -748,7 +814,9 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         Register(state, api, "__lua2cs_register_event", nameof(LuaApi.RegisterEvent));
         Register(state, api, "__lua2cs_register_listener", nameof(LuaApi.RegisterListener));
         Register(state, api, "__lua2cs_register_command", nameof(LuaApi.RegisterCommand));
+        Register(state, api, "__lua2cs_register_command_listener", nameof(LuaApi.RegisterCommandListener));
         Register(state, api, "__lua2cs_register_timer", nameof(LuaApi.RegisterTimer));
+        Register(state, api, "__lua2cs_register_frame", nameof(LuaApi.RegisterFrame));
         Register(state, api, "__lua2cs_register_load", nameof(LuaApi.RegisterLoad));
         Register(state, api, "__lua2cs_register_unload", nameof(LuaApi.RegisterUnload));
         Register(state, api, "__lua2cs_cancel_registration", nameof(LuaApi.CancelRegistration));
@@ -785,6 +853,8 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         Register(state, api, "__lua2cs_entities_find", nameof(LuaApi.FindEntities));
         Register(state, api, "__lua2cs_entities_get", nameof(LuaApi.GetEntity));
         Register(state, api, "__lua2cs_entities_create", nameof(LuaApi.CreateEntity));
+        Register(state, api, "__lua2cs_weapons_get", nameof(LuaApi.GetWeapon));
+        Register(state, api, "__lua2cs_weapons_find", nameof(LuaApi.FindWeapons));
         Register(state, api, "__lua2cs_entity_refresh", nameof(LuaApi.RefreshEntity));
         Register(state, api, "__lua2cs_entity_spawn", nameof(LuaApi.EntitySpawn));
         Register(state, api, "__lua2cs_entity_input", nameof(LuaApi.EntityInput));
@@ -796,6 +866,8 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         Register(state, api, "__lua2cs_entity_set_model", nameof(LuaApi.EntitySetModel));
         Register(state, api, "__lua2cs_entity_set_render_color", nameof(LuaApi.EntitySetRenderColor));
         Register(state, api, "__lua2cs_entity_emit_sound", nameof(LuaApi.EntityEmitSound));
+        Register(state, api, "__lua2cs_weapon_set_ammo", nameof(LuaApi.WeaponSetAmmo));
+        Register(state, api, "__lua2cs_weapon_set_econ", nameof(LuaApi.WeaponSetEcon));
         Register(state, api, "__lua2cs_players_all", nameof(LuaApi.GetPlayers));
         Register(state, api, "__lua2cs_players_get", nameof(LuaApi.GetPlayer));
         Register(state, api, "__lua2cs_players_get_userid", nameof(LuaApi.GetPlayerByUserId));
@@ -817,6 +889,7 @@ public sealed class LuaRuntime(ILogger logger, bool allowUnsafeLibraries)
         Register(state, api, "__lua2cs_player_convar", nameof(LuaApi.PlayerGetConVar));
         Register(state, api, "__lua2cs_player_execute", nameof(LuaApi.PlayerExecute));
         Register(state, api, "__lua2cs_player_give_item", nameof(LuaApi.PlayerGiveItem));
+        Register(state, api, "__lua2cs_player_give_weapon", nameof(LuaApi.PlayerGiveWeapon));
         Register(state, api, "__lua2cs_player_remove_item", nameof(LuaApi.PlayerRemoveItem));
         Register(state, api, "__lua2cs_player_remove_weapons", nameof(LuaApi.PlayerRemoveWeapons));
         Register(state, api, "__lua2cs_player_drop_weapon", nameof(LuaApi.PlayerDropActiveWeapon));

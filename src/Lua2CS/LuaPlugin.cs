@@ -132,6 +132,11 @@ public sealed class LuaPlugin : IDisposable
         catch (Exception exception)
         {
             _logger.LogError(exception, "Lua callback failed in {Plugin}", Name);
+            var rootCause = exception.GetBaseException();
+            if (!ReferenceEquals(rootCause, exception))
+            {
+                _logger.LogError(rootCause, "Lua callback root cause in {Plugin}", Name);
+            }
             return [];
         }
     }

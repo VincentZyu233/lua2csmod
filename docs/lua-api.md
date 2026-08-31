@@ -87,6 +87,27 @@ plugin:command("css_ping", function(player, command)
 end)
 ```
 
+### 原生命令监听
+
+`plugin:command_listener` 监听游戏或其他插件已经存在的命令，不会注册新命令。它适合观察、修改流程或拦截 `drop`、`kill`、`say` 等原生命令：
+
+```lua
+plugin:command_listener("drop", { mode = "pre" }, function(player, command)
+    if player == nil then return cs.continue end
+    player:print_chat("本次丢弃已被 Lua 拦截。")
+    return cs.handled
+end)
+```
+
+- `mode` 只能是 `pre` 或 `post`，默认 `pre`。
+- `player` 在服务器控制台执行时为 `nil`，`command` 字段和方法与自定义命令相同。
+- `cs.continue`：继续原始命令和其他 Hook。
+- `cs.handled`：阻止原始命令，但允许后续 Hook。
+- `cs.stop`：阻止原始命令和后续 Hook。
+- `cs.changed`：交回 CSS 的 `Changed` 结果；是否有效取决于目标命令和 Hook 阶段。
+
+Pre 监听器位于游戏执行原始命令之前，因此适合实现无限丢枪等需要“创建替代结果并保留原状态”的功能。Post 监听器通常用于审计和通知，原始行为已经发生，不能可靠撤销。多个插件监听同一命令时执行顺序不应作为稳定契约；只在确有必要时返回 `stop`。
+
 ## 菜单
 
 ```lua
@@ -129,7 +150,7 @@ plugin:cancel(timer_id)
 - `repeating`：是否循环执行，默认为 `false`。
 - `stop_on_map_change`：换图时是否停止，默认为 `true`。
 
-事件、Listener、命令和定时器注册都会返回 ID，可传给 `plugin:cancel`。脚本卸载或重载时，剩余注册项会自动清理。
+事件、Listener、自定义命令、原生命令监听、定时器和帧/Tick 调度都会返回 ID，可传给 `plugin:cancel`。脚本卸载或重载时，剩余注册项会自动清理。
 
 还可使用两个语义更明确的快捷方法：
 
@@ -144,6 +165,31 @@ end, { stop_on_map_change = true })
 ```
 
 一次性定时器执行完毕后会自动从插件注册表移除。
+
+### 帧与 Tick 调度
+
+```lua
+plugin:next_frame(function()
+    cs.log.info("下一游戏帧")
+end)
+
+plugin:next_world_update(function()
+    cs.log.info("下一次世界更新")
+end)
+
+local id = plugin:after_ticks(64, function()
+    cs.log.info("约 64 Tick 后")
+end)
+plugin:cancel(id)
+```
+
+- `next_frame(callback)`：在下一游戏帧执行。
+- `next_world_update(callback)`：在下一次世界更新执行，适合需要回到游戏线程的短期任务。
+- `after_ticks(ticks, callback)`：在当前 Tick 加上指定数量后执行；`ticks` 必须为 1 到 1,000,000 的整数。
+
+三种调度都只执行一次，执行后自动移除注册项，也可在执行前用 `plugin:cancel(id)` 取消。脚本卸载或热重载后，已经排入 CSS 队列的旧回调会检测失效句柄并直接返回，不会访问已销毁的 Lua VM。
+
+`plugin:timer` 使用秒数，表达玩法时间更直观；`after_ticks` 适合必须跨固定模拟 Tick 的短流程。服务器休眠时游戏帧和模拟 Tick 可能不推进，`next_frame` 与 `after_ticks` 会相应延后；需要在休眠状态下尽快回到游戏线程时优先使用 `next_world_update`。这些接口不是阻塞式 `sleep`，回调之外的 Lua 代码会立即继续执行。
 
 ## 服务器接口
 
@@ -270,7 +316,7 @@ local targets = cs.players.target("@alive", caller)
 
 玩家集合接口：
 
-- `cs.players.all()`：所有有效玩家，包括机器人和 HLTV。
+- `cs.players.all()`：所有已完全连接的有效玩家，包括机器人和 HLTV；正在连接或断开的控制器不会返回。
 - `cs.players.humans()`：排除机器人和 HLTV 的玩家。
 - `cs.players.bots()`：机器人玩家。
 - `cs.players.count()`：有效玩家数量。
@@ -286,6 +332,7 @@ local targets = cs.players.target("@alive", caller)
 
 玩家快照字段：
 
+- `snapshot_complete`：所有可选原生字段是否完整读取；为 `false` 时当前 CS2/CSS 状态不允许读取某一字段组，对应字段会省略。
 - `slot`：玩家槽位。
 - `user_id`：本次连接的 userid。
 - `name`：玩家名。
@@ -315,7 +362,18 @@ local targets = cs.players.target("@alive", caller)
 - `weapon_details`：与 `weapons` 顺序一致的详细武器快照数组。
 - `model`、`render_color`：当前模型路径和包含 `red/green/blue/alpha` 的渲染颜色。
 
-武器详细快照字段包括 `handle`、`index`、`designer_name`、`clip`、`reserve`、`reserve_secondary` 和 `item_definition_index`。武器切换、丢弃或删除后旧快照不会自动更新。
+武器详细快照字段包括：
+
+- `handle`、`index`、`designer_name`：完整 CHandle、当前实体索引和 Designer Name。
+- `clip`、`clip_secondary`、`reserve`、`reserve_secondary`：主副弹匣和两组备弹。
+- `econ_available`：当前 CSS 配置是否允许读取扩展经济字段；为 `false` 时下列经济字段会省略。
+- `item_definition_index`、`entity_quality`、`entity_level`：经济物品定义、品质和等级。
+- `paint_kit`、`paint_seed`、`paint_wear`、`stattrak`：后备皮肤、种子、磨损和 StatTrak 数值。
+- `item_id`、`account_id`、`inventory_position`、`original_owner_steam_id`：经济物品身份字段，均以十进制字符串返回，避免 Lua 浮点数丢失 64 位整数精度。
+- `custom_name`、`custom_name_override`：武器名称标签。
+- `position`、`rotation`、`velocity`、`owner_handle`：世界坐标、角度、速度和所有者实体句柄。
+
+武器切换、丢弃或删除后旧快照不会自动更新。调用 `weapon:refresh()` 获取最新快照；实体已经失效时返回 `nil`。
 
 玩家方法：
 
@@ -331,6 +389,7 @@ local targets = cs.players.target("@alive", caller)
 - `player:execute(command)`：让客户端执行允许客户端执行的命令。
 - `player:execute_as_server(command)`：以该玩家上下文执行服务器侧客户端命令。
 - `player:give_item(designer_name)`、`player:remove_item(designer_name)`
+- `player:give_weapon(designer_name, options)`：发放武器并返回武器对象，失败返回 `nil`；支持的选项参见“武器接口”。
 - `player:remove_weapons()`、`player:drop_active_weapon()`
 - `player:respawn()`、`player:kill(explode, force)`、`player:kick()`
 - `player:change_team(team)`：遵循游戏规则换队，通常会死亡并丢失装备。
@@ -355,9 +414,43 @@ local targets = cs.players.target("@alive", caller)
 
 ConVar 名称去除首尾空白后必须为 1 到 128 个不含空白或控制字符的字符；复制值最长 4096 字符，不能含换行或空字符。`replicate_convar` 是否对客户端产生可见效果取决于目标 ConVar 的引擎行为。
 
-玩家表是短期视图。所有玩家方法都会同时校验槽位、userid 和 SteamID64，旧表不会因槽位被新玩家复用而误操作新人。玩家断开连接或换图后，应通过查询接口重新获取，不要长期保存旧玩家表。
+玩家表是短期视图。所有玩家方法都会同时校验槽位、userid 和 SteamID64，旧表不会因槽位被新玩家复用而误操作新人。玩家断开连接或换图后，应通过查询接口重新获取，不要长期保存旧玩家表。Pawn、网络、模型和武器属于分组读取的可选字段；某组在连接切换或引擎状态变化期间读取失败时，`snapshot_complete` 为 `false`，核心身份字段和其他可用组仍会返回。
 
 `ip_address` 属于敏感信息，不应写入公开日志或发送给无管理权限的玩家。
+
+## 武器接口
+
+```lua
+local weapon = player:give_weapon("weapon_ak47", {
+    clip = 35,
+    reserve = 120,
+    paint_kit = 0,
+    paint_wear = 0.01,
+    custom_name = "Lua 武器"
+})
+
+local deagles = cs.weapons.find("weapon_deagle", 32)
+for _, existing in ipairs(deagles) do
+    cs.log.info("找到沙鹰实体 #" .. existing.index)
+end
+```
+
+- `cs.weapons.get(handle)`：按完整 CHandle 获取最新武器对象；失效返回 `nil`。
+- `cs.weapons.find(designer_name, limit)`：按精确 Designer Name 查询当前地图中现存的持有或掉落武器；`limit` 默认为 128，限制为 1 到 512，返回数组。
+- `player:give_weapon(designer_name, options)`：向玩家发放武器并返回对象。原有 `give_item` 继续返回布尔值，旧脚本无需修改。
+- `weapon:refresh()`：刷新武器快照。
+- `weapon:set_ammo(clip, reserve, clip_secondary, reserve_secondary)`：修改指定武器的四类弹药；不修改的参数传 `nil`，至少提供一个，范围为 0 到 10000。
+- `weapon:set_econ(options)`：修改指定武器的经济和外观属性。
+- `weapon:teleport(position, angles, velocity)`：移动世界武器并可赋予速度。
+- `weapon:remove(delay)`：立即或延迟删除；延迟范围为 0 到 3600 秒。
+
+发放选项支持 `clip`、`clip_secondary`、`reserve`、`reserve_secondary`，以及 `set_econ` 的全部字段：`paint_kit`、`paint_seed`、`paint_wear`、`stattrak`、`item_definition_index`、`entity_quality`、`entity_level`、`item_id`、`account_id`、`inventory_position`、`original_owner_steam_id`、`custom_name` 和 `custom_name_override`。`paint_wear` 限制为 0 到 1；名称不能包含换行或空字符，UTF-8 编码后最长 160 字节；64 位字段建议始终传十进制字符串。
+
+武器 Designer Name 必须以 `weapon_` 开头，并且只含 ASCII 字母、数字和下划线。接口不会验证该名称是否真由当前游戏版本注册；无效名称通常返回 `nil`，也可能由引擎记录错误。
+
+经济字段直接修改 CS2 Schema。外观是否立即在所有客户端刷新、某些刀具是否需要 `ChangeSubclass`、以及游戏规则是否覆盖弹药，取决于武器类别和当前 CS2 版本。普通枪械是主要支持范围；修改刀具、C4、手雷或库存身份字段前必须在测试服逐项验证。服务器若开启 CounterStrikeSharp 的 `FollowCS2ServerGuidelines`，部分经济字段会由 CSS 主动拒绝。
+
+Lua2CS 不直接开放手工创建世界武器：真实服务器验证表明，绕过游戏物品服务调用 `CreateEntityByName<CBasePlayerWeapon>` 在部分版本会导致进程崩溃。需要地面武器时应让 CS2 执行原生丢弃流程，再通过 `player:give_weapon` 补回一把等价武器。完整实现见 `infinite_weapon_drop.lua`；模板会在 30 秒后按完整句柄删除原生掉落实体，避免无限堆积。若武器期间被其他玩家捡走，到期删除仍会使它从背包消失。
 
 ## 实体接口
 
@@ -515,6 +608,10 @@ scripts/
 | `aim_inspector.lua` | 查询准星所指玩家 | 准星目标、玩家快照 |
 | `team_summary.lua` | 汇总双方人数和存活状态 | 玩家集合、队伍常量 |
 | `tpa.lua` | 玩家间传送请求、接受、拒绝和取消 | 玩家查找、身份校验、定时器、传送 |
+| `infinite_weapon_drop.lua` | 按 Q 原生丢枪并在下一帧补回副本 | 原生命令 Pre 监听、帧调度、武器发放、延迟清理 |
+| `native_command_listener.lua` | 观察或拦截原生游戏命令 | 命令前后置监听、HookResult |
+| `frame_scheduler.lua` | 安排短期帧和 Tick 回调 | 下一帧、世界更新、延迟 Tick、取消注册 |
+| `weapon_factory.lua` | 发放和复制带属性的武器 | 武器对象、弹药、经济外观、武器查询 |
 
 `tpa.lua` 注册 `css_tpa <玩家>`、`css_tpaccept [玩家]`、`css_tpdeny [玩家]` 和 `css_tpcancel`。玩家也可在聊天框中使用对应的 `!tpa`、`!tpaccept`、`!tpdeny` 和 `!tpcancel`。请求在 30 秒后自动过期；只有一个待处理请求时可以省略接受或拒绝命令的玩家参数，同时收到多个请求时必须指定玩家。
 

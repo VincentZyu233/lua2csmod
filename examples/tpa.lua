@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "玩家传送请求",
-    version = "1.1.0",
+    version = "1.2.0",
     description = "提供不限制阵营和回合状态的宽松玩家传送请求"
 })
 
@@ -129,8 +129,10 @@ plugin:command("css_tpa", {
     local request = {
         id = next_request_id,
         sender_id = player.steam_id,
+        sender_slot = player.slot,
         sender_name = player.name,
         target_id = target.steam_id,
+        target_slot = target.slot,
         target_name = target.name,
         expires_at = now() + request_timeout
     }
@@ -218,22 +220,20 @@ plugin:command("css_tpcancel", {
 end)
 
 plugin:listen("OnClientDisconnect", function(slot)
-    local player = cs.players.get(slot)
-    if player == nil then return end
-
-    -- 请求者离服时移除其发出的请求；接收者离服时移除发给他的全部请求。
-    local sent = outgoing[player.steam_id]
-    if sent ~= nil then
-        remove_request(sent)
-        notify_online(sent.target_id, sent.sender_name .. " 已离开服务器，传送请求已取消。")
+    -- 此时控制器可能已进入 Disconnecting，读取完整玩家快照会触发无效原生字段。
+    -- 请求创建时同时保存了连接槽位，因此可以直接定位需要清理的请求；长期身份仍用 SteamID。
+    local affected = {}
+    for _, request in pairs(outgoing) do
+        if request.sender_slot == slot or request.target_slot == slot then
+            affected[#affected + 1] = request
+        end
     end
 
-    local received = incoming[player.steam_id]
-    if received ~= nil then
-        local copy = {}
-        for _, request in pairs(received) do copy[#copy + 1] = request end
-        for _, request in ipairs(copy) do
-            remove_request(request)
+    for _, request in ipairs(affected) do
+        remove_request(request)
+        if request.sender_slot == slot then
+            notify_online(request.target_id, request.sender_name .. " 已离开服务器，传送请求已取消。")
+        else
             notify_online(request.sender_id, request.target_name .. " 已离开服务器，传送请求已取消。")
         end
     end

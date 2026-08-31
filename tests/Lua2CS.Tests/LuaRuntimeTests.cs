@@ -143,6 +143,57 @@ public sealed class LuaRuntimeTests : IDisposable
     }
 
     [Fact]
+    public void CommandListenersAndFrameSchedulesAreRegistered()
+    {
+        var path = WriteScript("schedules.lua", """
+            local plugin = cs.plugin({ name = "Schedules" })
+            plugin:command_listener("drop", { mode = "pre" }, function() return cs.handled end)
+            plugin:command_listener("say", { mode = "post" }, function() return cs.continue end)
+            plugin:next_frame(function() end)
+            plugin:next_world_update(function() end)
+            plugin:after_ticks(64, function() end)
+            """);
+
+        using var plugin = new LuaRuntime(NullLogger.Instance, false).Prepare(path);
+
+        var listeners = plugin.Registrations.OfType<CommandListenerRegistration>().ToArray();
+        Assert.Equal(2, listeners.Length);
+        Assert.Equal(CounterStrikeSharp.API.Core.HookMode.Pre, listeners[0].Mode);
+        Assert.Equal(CounterStrikeSharp.API.Core.HookMode.Post, listeners[1].Mode);
+        var frames = plugin.Registrations.OfType<FrameRegistration>().ToArray();
+        Assert.Equal([FrameSchedule.NextFrame, FrameSchedule.NextWorldUpdate, FrameSchedule.AfterTicks], frames.Select(item => item.Schedule));
+        Assert.Equal(64, frames[2].TickDelay);
+    }
+
+    [Fact]
+    public void WeaponApiIsExposedAndNativeBridgesAreHidden()
+    {
+        var path = WriteScript("weapons.lua", """
+            cs.plugin({ name = "Weapons" })
+            assert(cs.weapons.get ~= nil)
+            assert(cs.weapons.find ~= nil)
+            assert(__lua2cs_weapons_find == nil)
+            assert(__lua2cs_weapon_set_econ == nil)
+            assert(__lua2cs_player_give_weapon == nil)
+            """);
+
+        using var plugin = new LuaRuntime(NullLogger.Instance, false).Prepare(path);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(1000001)]
+    public void InvalidAfterTickDelaysAreRejected(int ticks)
+    {
+        var path = WriteScript("bad_ticks.lua", $$"""
+            local plugin = cs.plugin({ name = "Bad Ticks" })
+            plugin:after_ticks({{ticks}}, function() end)
+            """);
+        Assert.ThrowsAny<Exception>(() => new LuaRuntime(NullLogger.Instance, false).Prepare(path));
+    }
+
+    [Fact]
     public void LuaStringsUseUtf8AcrossPluginMetadataAndCommands()
     {
         var path = WriteScript("utf8.lua", """
@@ -465,6 +516,10 @@ public sealed class LuaRuntimeTests : IDisposable
     [InlineData("aim_inspector.lua")]
     [InlineData("team_summary.lua")]
     [InlineData("tpa.lua")]
+    [InlineData("infinite_weapon_drop.lua")]
+    [InlineData("native_command_listener.lua")]
+    [InlineData("frame_scheduler.lua")]
+    [InlineData("weapon_factory.lua")]
     public void ShippedExamplesLoad(string fileName)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "examples", fileName);
@@ -483,6 +538,19 @@ public sealed class LuaRuntimeTests : IDisposable
         Assert.All(commands.Values, command => Assert.True(string.IsNullOrEmpty(command.Permission)));
         Assert.Equal(1, commands["css_tpa"].MinArgs);
         Assert.Equal(0, commands["css_tpaccept"].MinArgs);
+    }
+
+    [Fact]
+    public void InfiniteDropUsesNativeDropAndDoesNotCreateWeaponEntitiesDirectly()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "examples", "infinite_weapon_drop.lua");
+        using var plugin = new LuaRuntime(NullLogger.Instance, false).Prepare(path);
+        var listener = Assert.IsType<CommandListenerRegistration>(
+            Assert.Single(plugin.Registrations.OfType<CommandListenerRegistration>()));
+
+        Assert.Equal("drop", listener.Name);
+        Assert.Equal(CounterStrikeSharp.API.Core.HookMode.Pre, listener.Mode);
+        Assert.DoesNotContain("cs.weapons.spawn", File.ReadAllText(path), StringComparison.Ordinal);
     }
 
     [Theory]

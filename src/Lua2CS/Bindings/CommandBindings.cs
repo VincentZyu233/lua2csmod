@@ -19,6 +19,14 @@ public sealed class CommandBindings(BasePlugin host)
         }
     }
 
+    public void Validate(CommandListenerRegistration registration)
+    {
+        if (string.IsNullOrWhiteSpace(registration.Name) || registration.Name.Any(char.IsWhiteSpace))
+        {
+            throw new InvalidDataException("Lua command listener names must be non-empty and cannot contain whitespace.");
+        }
+    }
+
     public IRegistrationHandle Activate(LuaPlugin plugin, CommandRegistration registration)
     {
         CommandInfo.CommandCallback handler = (player, command) =>
@@ -50,5 +58,20 @@ public sealed class CommandBindings(BasePlugin host)
 
         host.AddCommand(registration.Name, registration.Description, handler);
         return new RegistrationHandle(registration.Id, () => host.RemoveCommand(registration.Name, handler));
+    }
+
+    public IRegistrationHandle Activate(LuaPlugin plugin, CommandListenerRegistration registration)
+    {
+        CommandInfo.CommandListenerCallback handler = (player, command) =>
+        {
+            using var commandSnapshot = plugin.Api.CreateCommandSnapshot(command);
+            using var playerTable = player is null ? null : plugin.Api.CreatePlayerTable(player);
+            var result = plugin.Invoke(registration.Callback, playerTable, commandSnapshot.Table).FirstOrDefault();
+            return plugin.Api.ParseHookResult(result);
+        };
+
+        host.AddCommandListener(registration.Name, handler, registration.Mode);
+        return new RegistrationHandle(registration.Id, () =>
+            host.RemoveCommandListener(registration.Name, handler, registration.Mode));
     }
 }

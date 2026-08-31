@@ -18,6 +18,7 @@ public sealed class LuaPluginManager : IDisposable
     private readonly ListenerBindings _listeners;
     private readonly CommandBindings _commands;
     private readonly TimerBindings _timers;
+    private readonly FrameBindings _frames;
     private readonly Dictionary<string, LuaPlugin> _plugins = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
 
@@ -31,6 +32,7 @@ public sealed class LuaPluginManager : IDisposable
         _listeners = new ListenerBindings(host);
         _commands = new CommandBindings(host);
         _timers = new TimerBindings(host);
+        _frames = new FrameBindings();
         Directory.CreateDirectory(_scriptsDirectory);
     }
 
@@ -247,8 +249,14 @@ public sealed class LuaPluginManager : IDisposable
                     _commands.Validate(command);
                     if (!commands.Add(command.Name)) throw new InvalidDataException($"Duplicate Lua command '{command.Name}'.");
                     break;
+                case CommandListenerRegistration commandListener:
+                    _commands.Validate(commandListener);
+                    break;
                 case TimerRegistration timer:
                     _timers.Validate(timer);
+                    break;
+                case FrameRegistration frame:
+                    _frames.Validate(frame);
                     break;
                 default:
                     throw new NotSupportedException($"Unsupported Lua registration {registration.GetType().Name}.");
@@ -271,7 +279,9 @@ public sealed class LuaPluginManager : IDisposable
         EventRegistration gameEvent => _events.Activate(plugin, gameEvent),
         ListenerRegistration listener => _listeners.Activate(plugin, listener),
         CommandRegistration command => _commands.Activate(plugin, command),
+        CommandListenerRegistration commandListener => _commands.Activate(plugin, commandListener),
         TimerRegistration timer => _timers.Activate(plugin, timer),
+        FrameRegistration frame => _frames.Activate(plugin, frame),
         _ => throw new NotSupportedException($"Unsupported Lua registration {definition.GetType().Name}.")
     };
 

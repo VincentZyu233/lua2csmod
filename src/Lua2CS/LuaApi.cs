@@ -47,6 +47,7 @@ public sealed class LuaApi : IDisposable
         "__lua2cs_player_execute_method",
         "__lua2cs_player_execute_server_method",
         "__lua2cs_player_give_item_method",
+        "__lua2cs_player_give_weapon_method",
         "__lua2cs_player_remove_item_method",
         "__lua2cs_player_remove_weapons_method",
         "__lua2cs_player_drop_weapon_method",
@@ -85,6 +86,9 @@ public sealed class LuaApi : IDisposable
         "__lua2cs_entity_set_model_method",
         "__lua2cs_entity_set_render_color_method",
         "__lua2cs_entity_emit_sound_method",
+        "__lua2cs_weapon_refresh_method",
+        "__lua2cs_weapon_set_ammo_method",
+        "__lua2cs_weapon_set_econ_method",
         "__lua2cs_command_reply_method"
     ];
 
@@ -105,6 +109,7 @@ public sealed class LuaApi : IDisposable
     private LuaFunction? _playerExecuteMethod;
     private LuaFunction? _playerExecuteServerMethod;
     private LuaFunction? _playerGiveItemMethod;
+    private LuaFunction? _playerGiveWeaponMethod;
     private LuaFunction? _playerRemoveItemMethod;
     private LuaFunction? _playerRemoveWeaponsMethod;
     private LuaFunction? _playerDropWeaponMethod;
@@ -143,6 +148,9 @@ public sealed class LuaApi : IDisposable
     private LuaFunction? _entitySetModelMethod;
     private LuaFunction? _entitySetRenderColorMethod;
     private LuaFunction? _entityEmitSoundMethod;
+    private LuaFunction? _weaponRefreshMethod;
+    private LuaFunction? _weaponSetAmmoMethod;
+    private LuaFunction? _weaponSetEconMethod;
     private LuaFunction? _commandReplyMethod;
 
     private string StoragePath => Path.Combine(
@@ -170,6 +178,7 @@ public sealed class LuaApi : IDisposable
         _playerExecuteMethod = _plugin.State.GetFunction("__lua2cs_player_execute_method");
         _playerExecuteServerMethod = _plugin.State.GetFunction("__lua2cs_player_execute_server_method");
         _playerGiveItemMethod = _plugin.State.GetFunction("__lua2cs_player_give_item_method");
+        _playerGiveWeaponMethod = _plugin.State.GetFunction("__lua2cs_player_give_weapon_method");
         _playerRemoveItemMethod = _plugin.State.GetFunction("__lua2cs_player_remove_item_method");
         _playerRemoveWeaponsMethod = _plugin.State.GetFunction("__lua2cs_player_remove_weapons_method");
         _playerDropWeaponMethod = _plugin.State.GetFunction("__lua2cs_player_drop_weapon_method");
@@ -208,6 +217,9 @@ public sealed class LuaApi : IDisposable
         _entitySetModelMethod = _plugin.State.GetFunction("__lua2cs_entity_set_model_method");
         _entitySetRenderColorMethod = _plugin.State.GetFunction("__lua2cs_entity_set_render_color_method");
         _entityEmitSoundMethod = _plugin.State.GetFunction("__lua2cs_entity_emit_sound_method");
+        _weaponRefreshMethod = _plugin.State.GetFunction("__lua2cs_weapon_refresh_method");
+        _weaponSetAmmoMethod = _plugin.State.GetFunction("__lua2cs_weapon_set_ammo_method");
+        _weaponSetEconMethod = _plugin.State.GetFunction("__lua2cs_weapon_set_econ_method");
         _commandReplyMethod = _plugin.State.GetFunction("__lua2cs_command_reply_method");
 
         foreach (var name in WrapperMethodNames)
@@ -260,6 +272,20 @@ public sealed class LuaApi : IDisposable
         return id;
     }
 
+    public long RegisterCommandListener(string name, LuaTable options, LuaFunction callback)
+    {
+        var modeName = ReadString(options, "mode", defaultValue: "pre");
+        var mode = modeName.ToLowerInvariant() switch
+        {
+            "pre" => HookMode.Pre,
+            "post" => HookMode.Post,
+            _ => throw new InvalidDataException("Command listener mode must be pre or post.")
+        };
+        var id = _plugin.NextRegistrationId();
+        _plugin.AddRegistration(new CommandListenerRegistration(id, name.Trim(), mode, callback));
+        return id;
+    }
+
     public long RegisterTimer(double interval, LuaFunction callback, LuaTable options)
     {
         if (!double.IsFinite(interval) || interval <= 0 || interval > float.MaxValue)
@@ -274,6 +300,25 @@ public sealed class LuaApi : IDisposable
             ReadBool(options, "repeating", ReadBool(options, "repeat", false)),
             ReadBool(options, "stop_on_map_change", true),
             callback));
+        return id;
+    }
+
+    public long RegisterFrame(string scheduleName, long tickDelay, LuaFunction callback)
+    {
+        var schedule = scheduleName switch
+        {
+            "next_frame" => FrameSchedule.NextFrame,
+            "next_world_update" => FrameSchedule.NextWorldUpdate,
+            "after_ticks" => FrameSchedule.AfterTicks,
+            _ => throw new InvalidDataException($"Unknown frame schedule '{scheduleName}'.")
+        };
+        if (tickDelay is < 0 or > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(tickDelay));
+        if (schedule == FrameSchedule.AfterTicks && tickDelay is < 1 or > 1_000_000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(tickDelay), "after_ticks 延迟必须为 1 到 1000000 Tick。");
+        }
+        var id = _plugin.NextRegistrationId();
+        _plugin.AddRegistration(new FrameRegistration(id, schedule, (int)tickDelay, callback));
         return id;
     }
 
@@ -360,6 +405,48 @@ public sealed class LuaApi : IDisposable
             if (entity.IsValid) entity.Remove();
             throw;
         }
+    }
+
+    public LuaTable? GetWeapon(long handle)
+    {
+        var weapon = ResolveWeapon(handle);
+        return weapon is null ? null : CreateWeaponTable(weapon);
+    }
+
+    public LuaTable FindWeapons(string designerName, long limit)
+    {
+        designerName = ValidateWeaponDesignerName(designerName);
+        var weapons = Utilities.FindAllEntitiesByDesignerName<CBasePlayerWeapon>(designerName)
+            .Where(weapon => weapon.IsValid)
+            .Take((int)Math.Clamp(limit, 1, 512));
+        var table = NewTable();
+        var index = 1;
+        foreach (var weapon in weapons)
+        {
+            using var weaponTable = CreateWeaponTable(weapon);
+            table[index++] = weaponTable;
+        }
+        return table;
+    }
+
+    public bool WeaponSetAmmo(long handle, long clip, long reserve, long clipSecondary, long reserveSecondary)
+    {
+        ValidateOptionalAmmo(clip, nameof(clip));
+        ValidateOptionalAmmo(reserve, nameof(reserve));
+        ValidateOptionalAmmo(clipSecondary, nameof(clipSecondary));
+        ValidateOptionalAmmo(reserveSecondary, nameof(reserveSecondary));
+        var weapon = ResolveWeapon(handle);
+        if (weapon is null) return false;
+        ApplyWeaponAmmo(weapon, clip, reserve, clipSecondary, reserveSecondary);
+        return true;
+    }
+
+    public bool WeaponSetEcon(long handle, LuaTable options)
+    {
+        var weapon = ResolveWeapon(handle);
+        if (weapon is null) return false;
+        ApplyWeaponEcon(weapon, options);
+        return true;
     }
 
     public LuaTable? RefreshEntity(long handle)
@@ -801,6 +888,21 @@ public sealed class LuaApi : IDisposable
         return player.GiveNamedItem(designerName.Trim()) != IntPtr.Zero;
     }
 
+    public LuaTable? PlayerGiveWeapon(long slot, string designerName, LuaTable? options)
+    {
+        var player = ResolvePlayer(slot);
+        if (player is null) return null;
+        designerName = ValidateWeaponDesignerName(designerName);
+        ValidateWeaponOptions(options);
+        var pointer = player.GiveNamedItem(designerName);
+        if (pointer == IntPtr.Zero) return null;
+
+        var weapon = new CBasePlayerWeapon(pointer);
+        if (!weapon.IsValid) return null;
+        ApplyWeaponOptions(weapon, options);
+        return CreateWeaponTable(weapon);
+    }
+
     public bool PlayerRemoveItem(long slot, string designerName)
     {
         var player = ResolvePlayer(slot);
@@ -1178,76 +1280,110 @@ public sealed class LuaApi : IDisposable
     internal LuaTable CreatePlayerTable(CCSPlayerController player)
     {
         var table = NewTable();
-        var pawn = player.PlayerPawn.Value is { IsValid: true } validPawn ? validPawn : null;
-        var money = player.InGameMoneyServices?.Account;
+        var snapshotComplete = true;
+        CCSPlayerPawn? pawn = null;
+
+        void PopulateOptional(string group, Action populate)
+        {
+            try
+            {
+                populate();
+            }
+            catch (Exception exception)
+            {
+                snapshotComplete = false;
+                _logger.LogDebug(exception, "无法读取玩家 {Slot} 的 {Group} 快照字段", player.Slot, group);
+            }
+        }
+
         table["slot"] = player.Slot;
         table["user_id"] = player.UserId;
         table["name"] = player.PlayerName;
         table["steam_id"] = player.SteamID.ToString(CultureInfo.InvariantCulture);
-        table["ip_address"] = player.IpAddress;
         table["team"] = player.Team.ToString();
         table["team_id"] = (long)player.Team;
         table["is_bot"] = player.IsBot;
         table["is_hltv"] = player.IsHLTV;
         table["is_alive"] = player.PawnIsAlive;
-        table["ping"] = player.Ping;
-        table["score"] = player.Score;
-        table["round_score"] = player.RoundScore;
-        table["rounds_won"] = player.RoundsWon;
-        table["mvps"] = player.MVPs;
-        table["teammate_color"] = player.CompTeammateColor;
-        table["language"] = player.GetLanguage().Name;
-        table["voice_flags"] = (long)player.VoiceFlags;
-        table["health"] = pawn?.Health;
-        table["max_health"] = pawn?.MaxHealth;
-        table["armor"] = pawn?.ArmorValue;
-        table["money"] = money;
-        table["has_helmet"] = player.PawnHasHelmet;
-        table["has_defuser"] = player.PawnHasDefuser;
-        table["in_buy_zone"] = pawn?.InBuyZone;
-        table["in_bomb_zone"] = pawn?.InBombZone;
-        table["is_scoped"] = pawn?.IsScoped;
-        table["is_defusing"] = pawn?.IsDefusing;
-        table["is_grabbing_hostage"] = pawn?.IsGrabbingHostage;
-        table["is_walking"] = pawn?.IsWalking;
-        table["shots_fired"] = pawn?.ShotsFired;
-        table["velocity_modifier"] = pawn?.VelocityModifier;
-        table["gravity_scale"] = pawn?.GravityScale;
-        table["flags"] = pawn is null ? null : (long)pawn.Flags;
-        table["buttons"] = ReadButtons(pawn);
-        var activeWeapon = pawn?.WeaponServices?.ActiveWeapon.Value is { IsValid: true } validWeapon ? validWeapon : null;
-        table["active_weapon"] = activeWeapon?.DesignerName;
-        if (activeWeapon is not null)
+        PopulateOptional("连接", () =>
         {
-            using var activeWeaponTable = CreateWeaponTable(activeWeapon);
-            table["active_weapon_info"] = activeWeaponTable;
-        }
-
-        if (pawn?.CBodyComponent?.SceneNode is { } sceneNode)
+            table["ip_address"] = player.IpAddress;
+            table["ping"] = player.Ping;
+        });
+        PopulateOptional("计分板", () =>
         {
+            table["score"] = player.Score;
+            table["round_score"] = player.RoundScore;
+            table["rounds_won"] = player.RoundsWon;
+            table["mvps"] = player.MVPs;
+            table["teammate_color"] = player.CompTeammateColor;
+        });
+        PopulateOptional("语言与语音", () =>
+        {
+            table["language"] = player.GetLanguage().Name;
+            table["voice_flags"] = (long)player.VoiceFlags;
+        });
+        PopulateOptional("经济与装备", () =>
+        {
+            table["money"] = player.InGameMoneyServices?.Account;
+            table["has_helmet"] = player.PawnHasHelmet;
+            table["has_defuser"] = player.PawnHasDefuser;
+        });
+        PopulateOptional("Pawn", () =>
+        {
+            pawn = player.PlayerPawn.Value is { IsValid: true } validPawn ? validPawn : null;
+            table["health"] = pawn?.Health;
+            table["max_health"] = pawn?.MaxHealth;
+            table["armor"] = pawn?.ArmorValue;
+            table["in_buy_zone"] = pawn?.InBuyZone;
+            table["in_bomb_zone"] = pawn?.InBombZone;
+            table["is_scoped"] = pawn?.IsScoped;
+            table["is_defusing"] = pawn?.IsDefusing;
+            table["is_grabbing_hostage"] = pawn?.IsGrabbingHostage;
+            table["is_walking"] = pawn?.IsWalking;
+            table["shots_fired"] = pawn?.ShotsFired;
+            table["velocity_modifier"] = pawn?.VelocityModifier;
+            table["gravity_scale"] = pawn?.GravityScale;
+            table["flags"] = pawn is null ? null : (long)pawn.Flags;
+            table["buttons"] = ReadButtons(pawn);
+        });
+        PopulateOptional("坐标", () =>
+        {
+            if (pawn?.AbsOrigin is { } position)
+            {
+                using var positionTable = CreateVectorTable(position.X, position.Y, position.Z);
+                table["position"] = positionTable;
+            }
+            if (pawn is not null)
+            {
+                using var velocityTable = CreateVectorTable(pawn.AbsVelocity.X, pawn.AbsVelocity.Y, pawn.AbsVelocity.Z);
+                using var anglesTable = CreateVectorTable(pawn.EyeAngles.X, pawn.EyeAngles.Y, pawn.EyeAngles.Z);
+                table["velocity"] = velocityTable;
+                table["eye_angles"] = anglesTable;
+            }
+        });
+        PopulateOptional("模型", () =>
+        {
+            if (pawn?.CBodyComponent?.SceneNode is not { } sceneNode) return;
             table["model"] = sceneNode.GetSkeletonInstance().ModelState.ModelName;
             using var colorTable = CreateColorTable(pawn.Render);
             table["render_color"] = colorTable;
-        }
-
-        if (pawn?.AbsOrigin is { } position)
-        {
-            using var positionTable = CreateVectorTable(position.X, position.Y, position.Z);
-            table["position"] = positionTable;
-        }
-        if (pawn is not null)
-        {
-            using var velocityTable = CreateVectorTable(pawn.AbsVelocity.X, pawn.AbsVelocity.Y, pawn.AbsVelocity.Z);
-            using var anglesTable = CreateVectorTable(pawn.EyeAngles.X, pawn.EyeAngles.Y, pawn.EyeAngles.Z);
-            table["velocity"] = velocityTable;
-            table["eye_angles"] = anglesTable;
-        }
+        });
 
         var weapons = NewTable();
         var weaponDetails = NewTable();
         var weaponIndex = 1;
-        if (pawn?.WeaponServices is { } weaponServices)
+        PopulateOptional("武器", () =>
         {
+            var activeWeapon = pawn?.WeaponServices?.ActiveWeapon.Value is { IsValid: true } validWeapon ? validWeapon : null;
+            table["active_weapon"] = activeWeapon?.DesignerName;
+            if (activeWeapon is not null)
+            {
+                using var activeWeaponTable = CreateWeaponTable(activeWeapon);
+                table["active_weapon_info"] = activeWeaponTable;
+            }
+
+            if (pawn?.WeaponServices is not { } weaponServices) return;
             foreach (var weapon in weaponServices.MyWeapons.Select(handle => handle.Value).Where(weapon => weapon is { IsValid: true }))
             {
                 weapons[weaponIndex] = weapon!.DesignerName;
@@ -1255,9 +1391,10 @@ public sealed class LuaApi : IDisposable
                 weaponDetails[weaponIndex] = weaponTable;
                 weaponIndex++;
             }
-        }
+        });
         table["weapons"] = weapons;
         table["weapon_details"] = weaponDetails;
+        table["snapshot_complete"] = snapshotComplete;
         weapons.Dispose();
         weaponDetails.Dispose();
 
@@ -1273,6 +1410,7 @@ public sealed class LuaApi : IDisposable
         table["execute"] = _playerExecuteMethod;
         table["execute_as_server"] = _playerExecuteServerMethod;
         table["give_item"] = _playerGiveItemMethod;
+        table["give_weapon"] = _playerGiveWeaponMethod;
         table["remove_item"] = _playerRemoveItemMethod;
         table["remove_weapons"] = _playerRemoveWeaponsMethod;
         table["drop_active_weapon"] = _playerDropWeaponMethod;
@@ -1310,9 +1448,52 @@ public sealed class LuaApi : IDisposable
         table["index"] = (long)weapon.Index;
         table["designer_name"] = weapon.DesignerName;
         table["clip"] = weapon.Clip1;
+        table["clip_secondary"] = weapon.Clip2;
         table["reserve"] = weapon.ReserveAmmo[0];
         table["reserve_secondary"] = weapon.ReserveAmmo[1];
-        table["item_definition_index"] = weapon.AttributeManager.Item.ItemDefinitionIndex;
+        try
+        {
+            var item = weapon.AttributeManager.Item;
+            table["item_definition_index"] = item.ItemDefinitionIndex;
+            table["paint_kit"] = weapon.FallbackPaintKit;
+            table["paint_seed"] = weapon.FallbackSeed;
+            table["paint_wear"] = weapon.FallbackWear;
+            table["stattrak"] = weapon.FallbackStatTrak;
+            table["entity_quality"] = item.EntityQuality;
+            table["entity_level"] = item.EntityLevel;
+            table["item_id"] = item.ItemID.ToString(CultureInfo.InvariantCulture);
+            table["account_id"] = item.AccountID.ToString(CultureInfo.InvariantCulture);
+            table["inventory_position"] = item.InventoryPosition.ToString(CultureInfo.InvariantCulture);
+            table["custom_name"] = item.CustomName;
+            table["custom_name_override"] = item.CustomNameOverride;
+            var originalOwner = ((ulong)weapon.OriginalOwnerXuidHigh << 32) | weapon.OriginalOwnerXuidLow;
+            table["original_owner_steam_id"] = originalOwner.ToString(CultureInfo.InvariantCulture);
+            table["econ_available"] = true;
+        }
+        catch (Exception)
+        {
+            // CSS 的 FollowCS2ServerGuidelines 会禁止访问部分经济字段；核心武器快照仍应可用。
+            table["econ_available"] = false;
+        }
+        table["owner_handle"] = (long)weapon.OwnerEntity.Raw;
+
+        if (weapon.AbsOrigin is { } position)
+        {
+            using var positionTable = CreateVectorTable(position.X, position.Y, position.Z);
+            table["position"] = positionTable;
+        }
+        if (weapon.AbsRotation is { } rotation)
+        {
+            using var rotationTable = CreateVectorTable(rotation.X, rotation.Y, rotation.Z);
+            table["rotation"] = rotationTable;
+        }
+        using var velocityTable = CreateVectorTable(weapon.AbsVelocity.X, weapon.AbsVelocity.Y, weapon.AbsVelocity.Z);
+        table["velocity"] = velocityTable;
+        table["refresh"] = _weaponRefreshMethod;
+        table["set_ammo"] = _weaponSetAmmoMethod;
+        table["set_econ"] = _weaponSetEconMethod;
+        table["remove"] = _entityRemoveMethod;
+        table["teleport"] = _entityTeleportMethod;
         return table;
     }
 
@@ -1357,7 +1538,8 @@ public sealed class LuaApi : IDisposable
         return table;
     }
 
-    internal static bool IsUsablePlayer(CCSPlayerController? player) => player is { IsValid: true };
+    internal static bool IsUsablePlayer(CCSPlayerController? player) =>
+        player is { IsValid: true, Connected: PlayerConnectedState.Connected };
 
     private CCSPlayerController? ResolvePlayer(long slot)
     {
@@ -1383,6 +1565,13 @@ public sealed class LuaApi : IDisposable
         if (handle is < 0 or > uint.MaxValue) return null;
         var entity = new CHandle<CBaseEntity>((uint)handle).Value;
         return entity is { IsValid: true } ? entity : null;
+    }
+
+    private static CBasePlayerWeapon? ResolveWeapon(long handle)
+    {
+        if (handle is < 0 or > uint.MaxValue) return null;
+        var weapon = new CHandle<CBasePlayerWeapon>((uint)handle).Value;
+        return weapon is { IsValid: true } ? weapon : null;
     }
 
     private static CBaseModelEntity? ResolveModelEntity(long handle)
@@ -1552,6 +1741,195 @@ public sealed class LuaApi : IDisposable
             throw new ArgumentException("实体 Designer Name 只能包含 ASCII 字母、数字和下划线。", nameof(designerName));
         }
         return designerName;
+    }
+
+    private static string ValidateWeaponDesignerName(string designerName)
+    {
+        designerName = ValidateDesignerName(designerName);
+        if (!designerName.StartsWith("weapon_", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("武器 Designer Name 必须以 weapon_ 开头。", nameof(designerName));
+        }
+        return designerName;
+    }
+
+    private static void ApplyWeaponOptions(CBasePlayerWeapon weapon, LuaTable? options)
+    {
+        if (options is null) return;
+        ApplyWeaponAmmo(
+            weapon,
+            ReadOptionalAmmo(options, "clip"),
+            ReadOptionalAmmo(options, "reserve"),
+            ReadOptionalAmmo(options, "clip_secondary"),
+            ReadOptionalAmmo(options, "reserve_secondary"));
+        ApplyWeaponEcon(weapon, options);
+    }
+
+    private static void ValidateWeaponOptions(LuaTable? options)
+    {
+        if (options is null) return;
+        _ = ReadOptionalAmmo(options, "clip");
+        _ = ReadOptionalAmmo(options, "reserve");
+        _ = ReadOptionalAmmo(options, "clip_secondary");
+        _ = ReadOptionalAmmo(options, "reserve_secondary");
+        _ = ReadOptionalInteger(options, "paint_kit", int.MinValue, int.MaxValue);
+        _ = ReadOptionalInteger(options, "paint_seed", int.MinValue, int.MaxValue);
+        _ = ReadOptionalInteger(options, "stattrak", -1, int.MaxValue);
+        _ = ReadOptionalFiniteNumber(options, "paint_wear", 0, 1);
+        _ = ReadOptionalInteger(options, "item_definition_index", 0, ushort.MaxValue);
+        _ = ReadOptionalInteger(options, "entity_quality", int.MinValue, int.MaxValue);
+        _ = ReadOptionalInteger(options, "entity_level", 0, uint.MaxValue);
+        _ = ReadOptionalUnsigned(options, "item_id", ulong.MaxValue);
+        _ = ReadOptionalUnsigned(options, "account_id", uint.MaxValue);
+        _ = ReadOptionalUnsigned(options, "inventory_position", uint.MaxValue);
+        _ = ReadOptionalUnsigned(options, "original_owner_steam_id", ulong.MaxValue);
+        if (options["custom_name"] is not null) _ = ValidateWeaponName(options["custom_name"]?.ToString() ?? string.Empty);
+        if (options["custom_name_override"] is not null)
+        {
+            _ = ValidateWeaponName(options["custom_name_override"]?.ToString() ?? string.Empty);
+        }
+    }
+
+    private static void ApplyWeaponAmmo(CBasePlayerWeapon weapon, long clip, long reserve, long clipSecondary, long reserveSecondary)
+    {
+        ValidateOptionalAmmo(clip, nameof(clip));
+        ValidateOptionalAmmo(reserve, nameof(reserve));
+        ValidateOptionalAmmo(clipSecondary, nameof(clipSecondary));
+        ValidateOptionalAmmo(reserveSecondary, nameof(reserveSecondary));
+
+        if (clip >= 0)
+        {
+            weapon.Clip1 = (int)clip;
+            Utilities.SetStateChanged(weapon, "CBasePlayerWeapon", "m_iClip1");
+        }
+        if (clipSecondary >= 0)
+        {
+            weapon.Clip2 = (int)clipSecondary;
+            Utilities.SetStateChanged(weapon, "CBasePlayerWeapon", "m_iClip2");
+        }
+        if (reserve >= 0) weapon.ReserveAmmo[0] = (int)reserve;
+        if (reserveSecondary >= 0) weapon.ReserveAmmo[1] = (int)reserveSecondary;
+        if (reserve >= 0 || reserveSecondary >= 0)
+        {
+            Utilities.SetStateChanged(weapon, "CBasePlayerWeapon", "m_pReserveAmmo");
+        }
+    }
+
+    private static void ApplyWeaponEcon(CBasePlayerWeapon weapon, LuaTable options)
+    {
+        var paintKit = ReadOptionalInteger(options, "paint_kit", int.MinValue, int.MaxValue);
+        var paintSeed = ReadOptionalInteger(options, "paint_seed", int.MinValue, int.MaxValue);
+        var stattrak = ReadOptionalInteger(options, "stattrak", -1, int.MaxValue);
+        var wear = ReadOptionalFiniteNumber(options, "paint_wear", 0, 1);
+        var definition = ReadOptionalInteger(options, "item_definition_index", 0, ushort.MaxValue);
+        var quality = ReadOptionalInteger(options, "entity_quality", int.MinValue, int.MaxValue);
+        var level = ReadOptionalInteger(options, "entity_level", 0, uint.MaxValue);
+        var itemId = ReadOptionalUnsigned(options, "item_id", ulong.MaxValue);
+        var accountId = ReadOptionalUnsigned(options, "account_id", uint.MaxValue);
+        var inventoryPosition = ReadOptionalUnsigned(options, "inventory_position", uint.MaxValue);
+        var originalOwner = ReadOptionalUnsigned(options, "original_owner_steam_id", ulong.MaxValue);
+
+        if (paintKit != long.MinValue)
+        {
+            weapon.FallbackPaintKit = (int)paintKit;
+            Utilities.SetStateChanged(weapon, "CEconEntity", "m_nFallbackPaintKit");
+        }
+        if (paintSeed != long.MinValue)
+        {
+            weapon.FallbackSeed = (int)paintSeed;
+            Utilities.SetStateChanged(weapon, "CEconEntity", "m_nFallbackSeed");
+        }
+        if (wear.HasValue)
+        {
+            weapon.FallbackWear = (float)wear.Value;
+            Utilities.SetStateChanged(weapon, "CEconEntity", "m_flFallbackWear");
+        }
+        if (stattrak != long.MinValue)
+        {
+            weapon.FallbackStatTrak = (int)stattrak;
+            Utilities.SetStateChanged(weapon, "CEconEntity", "m_nFallbackStatTrak");
+        }
+        if (originalOwner.HasValue)
+        {
+            weapon.OriginalOwnerXuidLow = (uint)(originalOwner.Value & uint.MaxValue);
+            weapon.OriginalOwnerXuidHigh = (uint)(originalOwner.Value >> 32);
+        }
+
+        var item = weapon.AttributeManager.Item;
+        if (definition != long.MinValue) item.ItemDefinitionIndex = (ushort)definition;
+        if (quality != long.MinValue) item.EntityQuality = (int)quality;
+        if (level != long.MinValue) item.EntityLevel = (uint)level;
+        if (itemId.HasValue)
+        {
+            item.ItemID = itemId.Value;
+            item.ItemIDLow = (uint)(itemId.Value & uint.MaxValue);
+            item.ItemIDHigh = (uint)(itemId.Value >> 32);
+        }
+        if (accountId.HasValue) item.AccountID = (uint)accountId.Value;
+        if (inventoryPosition.HasValue) item.InventoryPosition = (uint)inventoryPosition.Value;
+        if (options["custom_name"] is not null) item.CustomName = ValidateWeaponName(options["custom_name"]?.ToString() ?? string.Empty);
+        if (options["custom_name_override"] is not null)
+        {
+            item.CustomNameOverride = ValidateWeaponName(options["custom_name_override"]?.ToString() ?? string.Empty);
+        }
+    }
+
+    private static void ValidateOptionalAmmo(long value, string parameterName)
+    {
+        if (value is < -1 or > 10_000)
+        {
+            throw new ArgumentOutOfRangeException(parameterName, "弹药数量必须为 0 到 10000，或使用 nil 保持不变。");
+        }
+    }
+
+    private static long ReadOptionalInteger(LuaTable table, string key, long minimum, long maximum)
+    {
+        var value = table[key];
+        if (value is null) return long.MinValue;
+        var number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
+        if (!double.IsFinite(number) || number != Math.Truncate(number) || number < minimum || number > maximum)
+        {
+            throw new ArgumentOutOfRangeException(key, $"{key} 必须是 {minimum} 到 {maximum} 的整数。");
+        }
+        return (long)number;
+    }
+
+    private static long ReadOptionalAmmo(LuaTable table, string key)
+    {
+        var value = ReadOptionalInteger(table, key, 0, 10_000);
+        return value == long.MinValue ? -1 : value;
+    }
+
+    private static double? ReadOptionalFiniteNumber(LuaTable table, string key, double minimum, double maximum)
+    {
+        var value = table[key];
+        if (value is null) return null;
+        var number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
+        if (!double.IsFinite(number) || number < minimum || number > maximum)
+        {
+            throw new ArgumentOutOfRangeException(key, $"{key} 必须是 {minimum} 到 {maximum} 的有限数值。");
+        }
+        return number;
+    }
+
+    private static ulong? ReadOptionalUnsigned(LuaTable table, string key, ulong maximum)
+    {
+        var value = table[key];
+        if (value is null) return null;
+        if (!ulong.TryParse(value.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) || parsed > maximum)
+        {
+            throw new ArgumentOutOfRangeException(key, $"{key} 必须是 0 到 {maximum} 的无符号整数或十进制字符串。");
+        }
+        return parsed;
+    }
+
+    private static string ValidateWeaponName(string value)
+    {
+        if (value.Any(character => character is '\0' or '\r' or '\n') || Encoding.UTF8.GetByteCount(value) > 160)
+        {
+            throw new ArgumentException("武器自定义名称不能包含换行或空字符，UTF-8 编码后不能超过 160 字节。", nameof(value));
+        }
+        return value;
     }
 
     private static string ValidateResourceName(string value, string label)
