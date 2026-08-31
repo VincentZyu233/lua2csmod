@@ -4,18 +4,18 @@ Lua2CS 是面向 CounterStrikeSharp 的 Lua 5.4 插件宿主。C# 宿主只需�
 
 ## 环境要求
 
-- Linux x64 CS2 专用服务器
+- Linux x64 或 Windows x64 CS2 专用服务器
 - Metamod:Source
 - CounterStrikeSharp API 1.0.373 或更高版本，并安装 .NET 10 运行时
 
 ## 安装
 
-1. 从 [预发布版本](https://github.com/ra1nyxin/lua2csmod/releases/tag/preview) 下载 `Lua2CS-preview-linux-x64.zip`。
+1. 从 [预发布版本](https://github.com/ra1nyxin/lua2csmod/releases/tag/preview) 下载服务器系统对应的安装包：Linux 使用 `Lua2CS-preview-linux-x64.zip`，Windows 使用 `Lua2CS-preview-win-x64.zip`。
 2. 将压缩包解压到服务器的 `game/csgo` 目录。
 3. 把 Lua 脚本放入 `addons/counterstrikesharp/plugins/Lua2CS/scripts`。
 4. 重启服务器，或执行 `css_plugins load Lua2CS`。
 
-压缩包已经包含 NLua、KeraLua 和 Linux x64 Lua 5.4 原生库，不需要在服务器上额外安装 Lua。
+两个压缩包都已包含 NLua、KeraLua 及对应系统的 Lua 5.4 原生库，不需要在服务器上额外安装 Lua。Linux 包携带 `liblua54.so`，Windows 包携带 `lua54.dll`，请勿混用。
 
 ## 脚本示例
 
@@ -111,7 +111,10 @@ dotnet test -c Release
 ./package.sh
 ```
 
-服务器安装包会生成到 `artifacts/Lua2CS-preview-linux-x64.zip`。
+脚本会同时生成以下服务器安装包：
+
+- `artifacts/Lua2CS-preview-linux-x64.zip`
+- `artifacts/Lua2CS-preview-win-x64.zip`
 
 ## 许可证
 

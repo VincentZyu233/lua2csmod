@@ -13,9 +13,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: 构建、测试并发布
-    runs-on: ubuntu-latest
+  test:
+    name: ${{ matrix.name }} 测试
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-latest
+          - name: Windows x64
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
@@ -24,14 +32,26 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: 恢复依赖
-        run: |
-          dotnet restore Lua2CS.sln
-          dotnet restore src/Lua2CS/Lua2CS.csproj --runtime linux-x64
+        run: dotnet restore Lua2CS.sln
 
       - name: 运行测试
         run: dotnet test Lua2CS.sln --configuration Release --no-restore
 
-      - name: 打包 Linux x64 插件
+  publish:
+    name: 构建并发布双平台安装包
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: 恢复双平台依赖
+        run: dotnet restore src/Lua2CS/Lua2CS.csproj
+
+      - name: 打包 Linux x64 和 Windows x64 插件
         run: ./package.sh --no-restore
 
       - name: 替换预发布版本
@@ -43,6 +63,7 @@ jobs:
           fi
           gh release create preview \
             artifacts/Lua2CS-preview-linux-x64.zip \
+            artifacts/Lua2CS-preview-win-x64.zip \
             --target "$GITHUB_SHA" \
             --title "Lua2CS 预发布版本" \
             --notes "由提交 $GITHUB_SHA 自动构建。" \
