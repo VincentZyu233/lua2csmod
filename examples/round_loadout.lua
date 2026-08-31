@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "回合装备",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "每回合向存活玩家发放统一装备"
 })
 

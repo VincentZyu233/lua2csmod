@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "游戏状态",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "查询当前回合阶段和双方比分"
 })
 

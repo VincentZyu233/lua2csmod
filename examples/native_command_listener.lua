@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "原生命令监听示例",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "演示在 CS2 原生命令执行前后观察或拦截命令"
 })
 

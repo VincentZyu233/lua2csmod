@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "Lua 菜单示例",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "展示聊天菜单和选项回调"
 })
 

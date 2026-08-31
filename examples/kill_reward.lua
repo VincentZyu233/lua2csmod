@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "击杀奖励",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "击杀敌人后增加金钱并显示提示"
 })
 

@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "传送点",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "保存当前位置并随时传送返回"
 })
 

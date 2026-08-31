@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "模型与颜色工具",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "为玩家设置已知模型路径或渲染颜色"
 })
 

@@ -3,7 +3,7 @@ local text = require("modules.text")
 
 local plugin = cs.plugin({
     name = "模块化示例",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "从子目录加载公共 Lua 模块"
 })
 

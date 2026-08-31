@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "弹药补给",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "查看并补充当前武器的弹匣和备弹"
 })
 

@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "武器检查器",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "显示玩家持有武器的详细快照"
 })
 

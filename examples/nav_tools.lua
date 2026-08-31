@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "导航网格工具",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "查询玩家脚下最近的 CS2 导航区域"
 })
 

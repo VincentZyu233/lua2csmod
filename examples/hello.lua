@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "你好 Lua",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "最小 Lua2CS 示例"
 })
 

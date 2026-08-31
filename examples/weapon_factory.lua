@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "武器工坊示例",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "演示发放和复制武器，以及修改弹药和外观属性"
 })
 

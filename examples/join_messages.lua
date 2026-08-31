@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "进出服播报",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "使用 Listener 播报玩家加入和离开"
 })
 

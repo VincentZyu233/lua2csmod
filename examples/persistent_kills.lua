@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "持久化击杀统计",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "跨热重载保存玩家累计击杀数"
 })
 

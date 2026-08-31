@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "移动参数工具",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "批量调整玩家重力和受击速度倍率"
 })
 

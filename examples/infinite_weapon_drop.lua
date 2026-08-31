@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "无限丢枪",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "按 Q 正常丢出枪械，并在下一帧向玩家补发等价副本"
 })
 

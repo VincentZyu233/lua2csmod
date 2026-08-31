@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "出生保护",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "出生后短暂获得额外生命和提示"
 })
 

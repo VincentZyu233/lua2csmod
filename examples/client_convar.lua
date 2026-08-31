@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "客户端 ConVar 工具",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "向指定客户端复制服务器给出的 ConVar 值"
 })
 

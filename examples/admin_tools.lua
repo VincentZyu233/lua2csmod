@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "Lua 管理工具",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "演示玩家查找、权限检查和常用管理操作"
 })
 

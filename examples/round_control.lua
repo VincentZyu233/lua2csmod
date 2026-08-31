@@ -1,6 +1,6 @@
 local plugin = cs.plugin({
     name = "回合控制工具",
-    version = "1.0.0",
+    version = "0.0.1",
     description = "由管理员结束当前回合"
 })
 
